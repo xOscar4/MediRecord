@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
@@ -46,6 +46,16 @@ type ScheduleEditorProps = {
 export function ScheduleEditor({ value, onChange, initialDate, disabled = false, error, showNotes = false }: ScheduleEditorProps) {
   const theme = useTheme();
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
+  // El diálogo nativo de Android recuerda el `initialDate` con el que se montó.
+  // Si recalculamos la fecha en cada render, cualquier re-render mientras el
+  // diálogo está abierto puede reiniciar la hora seleccionada a la original.
+  const [pickerDate, setPickerDate] = useState<Date | null>(null);
+  // El evento nativo puede entregarse después de un re-render; usar la referencia
+  // evita sobrescribir los cambios con un array `value` obsoleto.
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   function parsePickerDate(target: Exclude<PickerTarget, null>): Date {
     const schedule = value.find((item) => item.id === target.scheduleId);
@@ -76,8 +86,13 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
 
+  function openPicker(target: Exclude<PickerTarget, null>) {
+    setPickerDate(parsePickerDate(target));
+    setPickerTarget(target);
+  }
+
   function handlePickerValue(date: Date) {
-    if (!pickerTarget) return;
+    if (!pickerTarget || !date) return;
     updateSchedule(pickerTarget.scheduleId, {
       [pickerTarget.kind]: formatPickerDate(date, pickerTarget.kind),
     });
@@ -85,7 +100,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
   }
 
   function updateSchedule(id: string, update: Partial<MedicationScheduleDraft>) {
-    onChange(value.map((schedule) => schedule.id === id ? { ...schedule, ...update } : schedule));
+    onChange(valueRef.current.map((schedule) => schedule.id === id ? { ...schedule, ...update } : schedule));
   }
 
   function toggleDay(schedule: MedicationScheduleDraft, day: number) {
@@ -132,7 +147,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
               accessibilityLabel={`Cambiar hora del horario ${index + 1}`}
               accessibilityState={{ disabled }}
               disabled={disabled}
-              onPress={() => setPickerTarget({ scheduleId: schedule.id, kind: 'time' })}
+              onPress={() => openPicker({ scheduleId: schedule.id, kind: 'time' })}
               style={({ pressed }) => [styles.timeButton, { backgroundColor: theme.background, borderColor: theme.border, opacity: disabled ? 0.45 : pressed ? 0.78 : 1 }]}>
               <View style={[styles.timeIcon, { backgroundColor: theme.primarySoft }]}>
                 <AppIcon name={{ ios: 'clock.fill', android: 'schedule' }} color={theme.primary} size={20} />
@@ -182,7 +197,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
                 label="Elegir fecha de inicio"
                 icon={{ ios: 'calendar', android: 'calendar_month' }}
                 disabled={disabled}
-                onPress={() => setPickerTarget({ scheduleId: schedule.id, kind: 'startDate' })}
+                onPress={() => openPicker({ scheduleId: schedule.id, kind: 'startDate' })}
               />
             </View>
             <View style={styles.dateField}>
@@ -199,7 +214,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
                 label="Elegir fecha final"
                 icon={{ ios: 'calendar.badge.clock', android: 'event' }}
                 disabled={disabled}
-                onPress={() => setPickerTarget({ scheduleId: schedule.id, kind: 'endDate' })}
+                onPress={() => openPicker({ scheduleId: schedule.id, kind: 'endDate' })}
               />
             </View>
           </View>
@@ -236,7 +251,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
           Modal de React Native puede impedir que llegue la confirmación. */}
       {pickerTarget && Platform.OS === 'android' ? (
         <DateTimePicker
-          value={parsePickerDate(pickerTarget)}
+          value={pickerDate ?? parsePickerDate(pickerTarget)}
           mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
           display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
           presentation="dialog"
@@ -261,7 +276,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
                 </Pressable>
               </View>
               <DateTimePicker
-                value={parsePickerDate(pickerTarget)}
+                value={pickerDate ?? parsePickerDate(pickerTarget)}
                 mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
                 display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
                 presentation="inline"

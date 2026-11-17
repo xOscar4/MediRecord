@@ -29,9 +29,9 @@ create policy medication_photos_insert on storage.objects
     and exists (
       select 1
         from public.medications m
-       where m.id::text = (storage.foldername(name))[2]
+       where m.id::text = (storage.foldername(storage.objects.name))[2]
          and m.user_id = (select auth.uid())
-         and (m.photo_path is null or m.photo_path = name)
+         and (m.photo_path is null or m.photo_path = storage.objects.name)
     )
   );
 
@@ -47,14 +47,14 @@ create policy medication_photos_select on storage.objects
       exists (
         select 1
           from public.medications m
-         where m.id::text = (storage.foldername(name))[2]
+         where m.id::text = (storage.foldername(storage.objects.name))[2]
            and m.user_id = (select auth.uid())
       )
       -- o carpeta huérfana del propio usuario (medicamento ya eliminado)
       or not exists (
         select 1
           from public.medications m
-         where m.id::text = (storage.foldername(name))[2]
+         where m.id::text = (storage.foldername(storage.objects.name))[2]
       )
     )
   );
@@ -71,9 +71,9 @@ create policy medication_photos_delete on storage.objects
     and not exists (
       select 1
         from public.medications m
-       where m.id::text = (storage.foldername(name))[2]
+       where m.id::text = (storage.foldername(storage.objects.name))[2]
          and m.user_id = (select auth.uid())
-         and m.photo_path = name
+         and m.photo_path = storage.objects.name
     )
   );
 
