@@ -58,7 +58,7 @@ export function MedicationPhotoThumbnail({ photoPath, size = 52 }: { photoPath: 
   const showImage = Boolean(signedUrl) && failedUrl !== signedUrl;
 
   return (
-    <View style={[styles.thumbnail, { backgroundColor: theme.primarySoft, borderRadius: size / 3, height: size, width: size }]}>
+    <View style={[styles.thumbnail, { backgroundColor: theme.primarySoft, borderColor: theme.border, borderRadius: size / 3.4, borderWidth: 1, height: size, width: size }]}>
       {showImage ? (
         <Image
           accessibilityLabel="Fotografía del medicamento"
@@ -66,7 +66,7 @@ export function MedicationPhotoThumbnail({ photoPath, size = 52 }: { photoPath: 
           contentFit="cover"
           onError={() => setFailedUrl(signedUrl)}
           source={{ uri: signedUrl ?? undefined }}
-          style={[styles.thumbnailImage, { borderRadius: size / 3 }]}
+          style={[styles.thumbnailImage, { borderRadius: size / 3.4 }]}
         />
       ) : (
         <AppIcon name={{ ios: 'pills.fill', android: 'medication' }} color={theme.primary} size={size * 0.48} />
@@ -159,7 +159,7 @@ export function MedicationPhotoSection({
       {selectedPhoto ? (
         <View style={[styles.selectionNotice, { backgroundColor: theme.primarySoft }]}>
           <AppIcon name={{ ios: 'checkmark.circle', android: 'check_circle' }} color={theme.primary} size={18} />
-          <ThemedText type="small" style={styles.selectionText}>Nueva fotografía lista para guardar ({selectedPhoto.extension.toUpperCase()}).</ThemedText>
+          <ThemedText type="small" style={[styles.selectionText, { color: theme.primary }]}>Nueva fotografía lista para guardar ({selectedPhoto.extension.toUpperCase()}).</ThemedText>
         </View>
       ) : existingPhotoPath ? (
         <ThemedText type="small" themeColor="textSecondary">Fotografía guardada de forma privada.</ThemedText>
@@ -206,14 +206,14 @@ const styles = StyleSheet.create({
   section: { gap: Spacing.two },
   sectionHeading: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
   sectionTitleCopy: { flex: 1, gap: 3 },
-  preview: { alignItems: 'center', borderRadius: 18, borderWidth: 1, height: 178, justifyContent: 'center', overflow: 'hidden', width: '100%' },
+  preview: { alignItems: 'center', borderRadius: 16, borderWidth: 1, height: 190, justifyContent: 'center', overflow: 'hidden', width: '100%' },
   previewImage: { height: '100%', width: '100%' },
   fallbackPreview: { alignItems: 'center', gap: Spacing.two, padding: Spacing.three },
-  fallbackIcon: { alignItems: 'center', borderRadius: 18, height: 58, justifyContent: 'center', width: 58 },
+  fallbackIcon: { alignItems: 'center', borderRadius: 16, height: 58, justifyContent: 'center', width: 58 },
   selectionNotice: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 8, padding: 10 },
-  selectionText: { color: '#0F766E', flex: 1 },
+  selectionText: { flex: 1 },
   buttonRow: { flexDirection: 'row', gap: Spacing.two },
-  photoButton: { alignItems: 'center', borderRadius: 13, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'center', minHeight: 44, paddingHorizontal: 8 },
+  photoButton: { alignItems: 'center', borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 7, justifyContent: 'center', minHeight: 48, paddingHorizontal: 8 },
   textAction: { alignSelf: 'flex-start', minHeight: 30, justifyContent: 'center' },
   error: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 8, padding: 10 },
   errorText: { flex: 1 },

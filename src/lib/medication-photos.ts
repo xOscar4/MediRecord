@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 
 import { supabase } from '@/lib/supabase';
@@ -208,24 +209,27 @@ async function restorePhotoReference(medicationId: string, path: string, userId:
 }
 
 async function readPhotoBytes(photo: SelectedMedicationPhoto): Promise<ArrayBuffer> {
-  let response: Response;
+  // expo-image-picker devuelve URIs file:// (o content:// copies en caché).
+  // React Native fetch() no puede leer ese esquema en Android, así que se usa
+  // la API de archivos del SDK instalado, que sí está incluida en Expo Go.
+  let file: File;
   try {
-    response = await fetch(photo.uri);
+    file = new File(photo.uri);
+    if (!file.exists) throw new Error('La fotografía ya no existe en el dispositivo.');
   } catch {
-    throw new MedicationPhotoError('No pudimos leer la fotografía seleccionada.', 'storage');
-  }
-
-  if (!response.ok) {
     throw new MedicationPhotoError('No pudimos leer la fotografía seleccionada.', 'storage');
   }
 
   let bytes: ArrayBuffer;
   try {
-    bytes = await response.arrayBuffer();
+    bytes = await file.arrayBuffer();
   } catch {
     throw new MedicationPhotoError('No pudimos preparar la fotografía para subirla.', 'storage');
   }
 
+  if (bytes.byteLength === 0) {
+    throw new MedicationPhotoError('No pudimos leer la fotografía seleccionada.', 'storage');
+  }
   if (bytes.byteLength > MEDICATION_PHOTO_MAX_BYTES) {
     throw new MedicationPhotoError('La fotografía supera el límite de 5 MB.', 'invalid');
   }

@@ -4,14 +4,16 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionButton, TextField } from '@/components/form-controls';
+import { DoseFormSelector } from '@/components/dose-form-selector';
 import { MedicationPhotoSection, useMedicationPhotoUrl } from '@/components/medication-photo-section';
 import { ScheduleEditor } from '@/components/schedule-editor';
-import { AppIcon, SectionLabel, SurfaceCard } from '@/components/ui-kit';
+import { AppIcon, FormSection, InlineMessage, PageHeader, SectionLabel, SurfaceCard } from '@/components/ui-kit';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
+  archiveMedication,
   fetchMedicationById,
   MedicationEditError,
   saveMedicationScheduleChange,
@@ -23,16 +25,6 @@ import { reconcileMedicationAlarms } from '@/lib/medication-alarm-reconciler';
 import { clearMedicationPhoto, MedicationPhotoError, saveMedicationPhoto, type SelectedMedicationPhoto } from '@/lib/medication-photos';
 import { useAuth } from '@/providers/auth-provider';
 import type { Medication, MedicationDoseForm, MedicationSchedule, MedicationScheduleDraft } from '@/types/medications';
-
-const DOSE_FORMS: { value: MedicationDoseForm; label: string }[] = [
-  { value: 'tablet', label: 'Tableta' },
-  { value: 'capsule', label: 'Cápsula' },
-  { value: 'liquid', label: 'Líquido' },
-  { value: 'drops', label: 'Gotas' },
-  { value: 'injection', label: 'Inyección' },
-  { value: 'inhaler', label: 'Inhalador' },
-  { value: 'other', label: 'Otro' },
-];
 
 function getTodayInTimezone(timezone?: string): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -61,6 +53,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'No pudimos cargar el medicamento. Inténtalo de nuevo.';
 }
 
+function deleteErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'No pudimos eliminar el medicamento. Inténtalo de nuevo.';
+  // La RPC subyacente se llama "archivar"; en esta pantalla el usuario está
+  // confirmando una eliminación lógica, así que se ajusta la redacción.
+  return error.message.replace(/archivar/g, 'eliminar').replace(/archivad/g, 'eliminad');
+}
+
 export default function EditarMedicamentoScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const { user, profile } = useAuth();
@@ -75,8 +74,10 @@ export default function EditarMedicamentoScreen() {
   const [instructions, setInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<SelectedMedicationPhoto | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isPhotoActionLoading, setIsPhotoActionLoading] = useState(false);
@@ -138,7 +139,10 @@ export default function EditarMedicamentoScreen() {
         if (!draft) continue;
         const original = draft.persistedId ? originalById.get(draft.persistedId) ?? null : null;
         const result = await saveMedicationScheduleChange(medication.id, draft, original);
-        nextSchedules[index] = { ...draft, persistedId: result.scheduleId };
+        // replace_schedule archiva el horario y crea uno nuevo con otro ID.
+        // El editor debe usar el ID nuevo también como clave local; si no, un
+        // segundo guardado intentaría modificar el horario archivado.
+        nextSchedules[index] = { ...draft, id: result.scheduleId, persistedId: result.scheduleId };
       }
 
       if (selectedPhoto) {
@@ -200,6 +204,39 @@ export default function EditarMedicamentoScreen() {
     }
   }
 
+  function requestDelete() {
+    if (isSaving || isDeleting || isPhotoActionLoading || !medication || !user) return;
+    Alert.alert(
+      '¿Eliminar medicamento?',
+      '¿Estás seguro de que deseas eliminar este medicamento? Ya no aparecerá en tu lista de medicamentos ni en la agenda.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar medicamento', style: 'destructive', onPress: () => void deleteMedication() },
+      ]
+    );
+  }
+
+  async function deleteMedication() {
+    if (!medication) return;
+    setDeleteError(null);
+    setIsDeleting(true);
+    try {
+      // Eliminación lógica: archive_medication desactiva el medicamento y sus
+      // horarios, omite tomas futuras y conserva el historial de dosis.
+      await archiveMedication(medication.id, true);
+      await reconcileMedicationAlarms();
+      Alert.alert(
+        'Medicamento eliminado',
+        'Ya no aparecerá en tu agenda activa. El historial de tomas se conserva.',
+        [{ text: 'Volver a medicamentos', onPress: () => router.back() }]
+      );
+    } catch (error) {
+      setDeleteError(deleteErrorMessage(error));
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   if (isLoading) {
     return <ThemedView style={styles.centered}><ActivityIndicator color={theme.primary} /><ThemedText type="small" themeColor="textSecondary">Cargando medicamento…</ThemedText></ThemedView>;
   }
@@ -215,7 +252,7 @@ export default function EditarMedicamentoScreen() {
   }
 
   const initialDate = schedules[0]?.startDate ?? getTodayInTimezone(profile?.timezone);
-  const formBusy = isSaving || isPhotoActionLoading;
+  const formBusy = isSaving || isDeleting || isPhotoActionLoading;
 
   return (
     <ThemedView style={styles.container}>
@@ -226,48 +263,24 @@ export default function EditarMedicamentoScreen() {
             contentInsetAdjustmentBehavior="automatic"
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
-            <View style={styles.intro}>
-              <SectionLabel>Tratamiento</SectionLabel>
-              <ThemedText type="title" style={styles.title}>Editar medicamento</ThemedText>
-              <ThemedText themeColor="textSecondary">Actualiza los datos y horarios sin modificar el historial de tomas.</ThemedText>
-            </View>
+            <PageHeader
+              eyebrow="Tratamiento"
+              title="Editar medicamento"
+              description="Actualiza los datos y horarios sin modificar el historial de tomas."
+              icon={{ ios: 'pencil', android: 'edit' }}
+            />
 
-            {saveError ? (
-              <View style={[styles.errorCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-                <AppIcon name={{ ios: 'exclamationmark.triangle', android: 'warning' }} color={theme.danger} size={22} />
-                <ThemedText type="small" style={styles.errorText}>{saveError}</ThemedText>
-              </View>
-            ) : null}
+            {saveError ? <InlineMessage>{saveError}</InlineMessage> : null}
 
-            <SurfaceCard style={styles.formCard}>
-              <View style={styles.cardHeading}>
-                <AppIcon name={{ ios: 'pills.fill', android: 'medication' }} color={theme.primary} size={22} />
-                <ThemedText type="subtitle" style={styles.cardTitle}>Información del medicamento</ThemedText>
-              </View>
+            <FormSection
+              icon={{ ios: 'pills.fill', android: 'medication' }}
+              title="Datos del medicamento"
+              description="Ajusta el nombre, la dosis y su presentación.">
               <TextField label="Nombre del medicamento" value={name} onChangeText={setName} maxLength={120} editable={!formBusy} />
               <TextField label="Cantidad o dosis" value={doseAmount} onChangeText={setDoseAmount} maxLength={120} editable={!formBusy} />
-              <View style={styles.choiceSection}>
-                <ThemedText type="smallBold" themeColor="textSecondary">FORMA FARMACÉUTICA</ThemedText>
-                <View style={styles.choiceGrid}>
-                  {DOSE_FORMS.map((form) => {
-                    const selected = doseForm === form.value;
-                    return (
-                      <Pressable
-                        key={form.value}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: selected, disabled: formBusy }}
-                        disabled={formBusy}
-                        onPress={() => setDoseForm(selected ? null : form.value)}
-                        style={[styles.choice, { backgroundColor: selected ? theme.primarySoft : theme.background, borderColor: selected ? theme.primary : theme.border, opacity: formBusy ? 0.55 : 1 }]}
-                      >
-                        <ThemedText type="smallBold" style={{ color: selected ? theme.primary : theme.textSecondary }}>{form.label}</ThemedText>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
+              <DoseFormSelector value={doseForm} onChange={setDoseForm} disabled={formBusy} />
               <TextField label="Instrucciones" value={instructions} onChangeText={setInstructions} placeholder="Opcional" multiline maxLength={1000} editable={!formBusy} style={styles.instructionsInput} />
-            </SurfaceCard>
+            </FormSection>
 
             <SurfaceCard style={styles.formCard}>
               <MedicationPhotoSection
@@ -287,15 +300,36 @@ export default function EditarMedicamentoScreen() {
             <View style={styles.sectionHeader}>
               <View style={styles.sectionCopy}>
                 <SectionLabel>Administración</SectionLabel>
-                <ThemedText type="subtitle">Horarios y fechas</ThemedText>
+                <ThemedText type="subtitle" style={styles.sectionTitle}>Horarios y fechas</ThemedText>
               </View>
               <ThemedText type="small" themeColor="textSecondary">{schedules.length} {schedules.length === 1 ? 'horario' : 'horarios'}</ThemedText>
             </View>
 
             <ScheduleEditor value={schedules} onChange={setSchedules} initialDate={initialDate} disabled={formBusy} showNotes error={saveError} />
 
-            <ActionButton label="Guardar cambios" onPress={() => void handleSave()} loading={isSaving} disabled={!user || name.trim().length === 0} />
+            <ActionButton label="Guardar cambios" onPress={() => void handleSave()} loading={isSaving} disabled={!user || name.trim().length === 0} size="large" />
             <ThemedText type="small" themeColor="textSecondary" style={styles.footerHint}>Los horarios existentes no se eliminan; sus cambios respetan el historial de tomas.</ThemedText>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Eliminar medicamento"
+              accessibilityState={{ disabled: formBusy || !user, busy: isDeleting }}
+              disabled={formBusy || !user}
+              onPress={requestDelete}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                {
+                  backgroundColor: `${theme.danger}0F`,
+                  borderColor: `${theme.danger}33`,
+                  opacity: formBusy || !user ? 0.45 : pressed ? 0.78 : 1,
+                },
+              ]}>
+              <AppIcon name={{ ios: 'trash', android: 'delete' }} color={theme.danger} size={19} />
+              <ThemedText type="smallBold" style={{ color: theme.danger }}>
+                {isDeleting ? 'Eliminando…' : 'Eliminar medicamento'}
+              </ThemedText>
+            </Pressable>
+            {deleteError ? <InlineMessage>{deleteError}</InlineMessage> : null}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -309,18 +343,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { alignSelf: 'center', gap: Spacing.three, maxWidth: MaxContentWidth, paddingBottom: BottomTabInset + Spacing.five, paddingHorizontal: Spacing.four, paddingTop: Spacing.two, width: '100%' },
   centered: { alignItems: 'center', flex: 1, gap: Spacing.three, justifyContent: 'center', padding: Spacing.four },
-  intro: { gap: 6 },
-  title: { fontSize: 32, lineHeight: 38 },
-  errorCard: { alignItems: 'center', borderRadius: 18, borderWidth: 1, flexDirection: 'row', gap: 10, padding: 14 },
-  errorText: { color: '#C94A50', flex: 1 },
   formCard: { gap: Spacing.three },
-  cardHeading: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  cardTitle: { fontSize: 22, lineHeight: 28 },
-  choiceSection: { gap: Spacing.two },
-  choiceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  choice: { borderRadius: 13, borderWidth: 1, minHeight: 42, paddingHorizontal: 12, paddingVertical: 10 },
-  instructionsInput: { minHeight: 92, textAlignVertical: 'top' },
+  instructionsInput: { minHeight: 96, textAlignVertical: 'top' },
   sectionHeader: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', paddingTop: Spacing.two },
   sectionCopy: { gap: 3 },
+  sectionTitle: { fontSize: 22, lineHeight: 28 },
   footerHint: { textAlign: 'center' },
+  deleteButton: { alignItems: 'center', borderCurve: 'continuous', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 10, justifyContent: 'center', minHeight: 52, paddingHorizontal: Spacing.three },
 });

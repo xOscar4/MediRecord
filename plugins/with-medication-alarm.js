@@ -77,6 +77,10 @@ function withMedicationAlarm(config) {
             action: [
               { $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } },
               { $: { 'android:name': 'android.intent.action.MY_PACKAGE_REPLACED' } },
+              { $: { 'android:name': 'android.intent.action.TIMEZONE_CHANGED' } },
+              { $: { 'android:name': 'android.intent.action.TIME_SET' } },
+              { $: { 'android:name': 'android.intent.action.DATE_CHANGED' } },
+              { $: { 'android:name': 'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED' } },
             ],
           },
         ],

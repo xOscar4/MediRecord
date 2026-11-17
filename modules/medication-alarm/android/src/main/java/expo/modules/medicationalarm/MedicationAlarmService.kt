@@ -1,56 +1,70 @@
 package expo.modules.medicationalarm
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
-import android.net.Uri
 import android.os.Build
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 
 class MedicationAlarmService : Service() {
   companion object {
-    private const val CHANNEL_ID = "medication-alerts"
-    private const val NOTIFICATION_ID = 74_920
     private val VIBRATION_PATTERN = longArrayOf(0L, 850L, 550L)
   }
 
   private var mediaPlayer: MediaPlayer? = null
   private var vibrator: Vibrator? = null
+  private var serviceUserId: String? = null
 
   override fun onCreate() {
     super.onCreate()
-    createNotificationChannel()
+    MedicationAlarmNotification.ensureChannel(this)
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       AlarmIntents.ACTION_START_SERVICE -> {
         val occurrenceId = intent.getStringExtra(AlarmIntents.EXTRA_OCCURRENCE_ID)
-        if (occurrenceId != null) {
-          AlarmStore.findScheduled(this, occurrenceId)?.let { AlarmStore.markActive(this, it) }
+        val userId = intent.getStringExtra(AlarmIntents.EXTRA_USER_ID)
+        val record = if (occurrenceId != null && userId != null) {
+          AlarmStore.findActive(this, occurrenceId, userId)
+        } else null
+        // Un START_SERVICE retrasado de una alarma ya cancelada no debe
+        // reactivarla. Tampoco debe silenciar otra alarma válida que siga
+        // activa, por eso solo se detiene cuando no queda nada que mostrar.
+        if (record == null || userId == null || AlarmStore.authorizedUser(this) != userId) {
+          stopIfNoCurrentAlarm()
+          return START_NOT_STICKY
         }
+        serviceUserId = userId
+        runCatching { AlarmStore.setServiceUser(this, userId) }
+          .onFailure { Log.e("MedicationAlarmService", "No se pudo marcar el usuario del servicio", it) }
         if (!startForegroundSafely()) return START_NOT_STICKY
-        startAlert()
+        startAlert(userId)
       }
       AlarmIntents.ACTION_STOP_SERVICE -> {
-        if (AlarmStore.active(this).isEmpty()) stopAlertAndSelf()
-        else updateNotification()
+        val requestedUserId = intent.getStringExtra(AlarmIntents.EXTRA_USER_ID)
+        val owner = serviceUserId ?: AlarmStore.serviceUser(this)
+        if (owner == null || requestedUserId == null || owner == requestedUserId) {
+          if (owner == null || AlarmStore.activeForUser(this, owner).isEmpty()) stopAlertAndSelf()
+          else updateNotification(owner)
+        }
       }
       null -> {
-        if (AlarmStore.active(this).isEmpty()) stopAlertAndSelf()
-        else if (startForegroundSafely()) startAlert()
+        val owner = serviceUserId ?: AlarmStore.serviceUser(this)
+        if (owner == null || AlarmStore.authorizedUser(this) != owner || AlarmStore.activeForUser(this, owner).isEmpty()) {
+          stopAlertAndSelf()
+        } else if (startForegroundSafely()) {
+          serviceUserId = owner
+          startAlert(owner)
+        }
       }
     }
     return START_STICKY
@@ -58,23 +72,48 @@ class MedicationAlarmService : Service() {
 
   private fun startForegroundSafely(): Boolean {
     return try {
-      val notification = buildNotification()
+      val owner = serviceUserId ?: AlarmStore.serviceUser(this) ?: return false
+      val notification = MedicationAlarmNotification.build(
+        this,
+        AlarmStore.activeForUser(this, owner),
+        fullScreen = true,
+      )
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        startForeground(MedicationAlarmNotification.NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
       } else {
-        startForeground(NOTIFICATION_ID, notification)
+        startForeground(MedicationAlarmNotification.NOTIFICATION_ID, notification)
       }
       true
-    } catch (_: SecurityException) {
-      stopSelf()
+    } catch (error: Exception) {
+      Log.e("MedicationAlarmService", "No se pudo iniciar el foreground service", error)
+      stopAlertAndSelf()
       false
     }
   }
 
-  private fun startAlert() {
+  private fun stopIfNoCurrentAlarm() {
+    val owner = serviceUserId ?: AlarmStore.serviceUser(this)
+    val authorized = AlarmStore.authorizedUser(this)
+    val keepRunning = owner != null
+      && owner == authorized
+      && AlarmStore.activeForUser(this, owner).isNotEmpty()
+    if (!keepRunning) stopAlertAndSelf()
+  }
+
+  private fun startAlert(userId: String) {
+    if (AlarmStore.authorizedUser(this) != userId || AlarmStore.activeForUser(this, userId).isEmpty()) {
+      stopAlertAndSelf()
+      return
+    }
     if (mediaPlayer == null) {
       mediaPlayer = createAlarmPlayer()
-      mediaPlayer?.start()
+      try {
+        mediaPlayer?.start()
+      } catch (error: Exception) {
+        Log.e("MedicationAlarmService", "No se pudo iniciar el tono de alarma", error)
+        mediaPlayer?.release()
+        mediaPlayer = null
+      }
     }
 
     if (vibrator == null) {
@@ -91,7 +130,7 @@ class MedicationAlarmService : Service() {
         @Suppress("DEPRECATION") deviceVibrator.vibrate(VIBRATION_PATTERN, 0)
       }
     }
-    updateNotification()
+    updateNotification(userId)
   }
 
   private fun createAlarmPlayer(): MediaPlayer? {
@@ -114,66 +153,11 @@ class MedicationAlarmService : Service() {
     }.getOrNull()
   }
 
-  private fun createNotificationChannel() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-    val audioAttributes = AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_ALARM)
-      .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-      .build()
-    val channel = NotificationChannel(CHANNEL_ID, "Alarmas de medicamentos", NotificationManager.IMPORTANCE_HIGH).apply {
-      description = "Recordatorios de medicamentos que requieren confirmación"
-      enableVibration(true)
-      vibrationPattern = VIBRATION_PATTERN
-      setSound(alarmUri, audioAttributes)
-      lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-    }
-    getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
-  }
-
-  private fun buildNotification(): Notification {
-    val active = AlarmStore.active(this)
-    val current = active.firstOrNull()
-    val title = current?.title ?: "Alarma de medicamento"
-    val text = if (active.size > 1) "Tienes ${active.size} alarmas de medicamentos activas" else listOfNotNull(current?.dose, current?.scheduledAt).joinToString(" · ").ifBlank { "Confirma la toma para detener la alarma" }
-    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-      data = buildAlarmUri(current)
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    }
-    val contentIntent = launchIntent?.let {
-      PendingIntent.getActivity(this, AlarmIntents.requestCode(current?.occurrenceId ?: "active"), it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    }
-
-    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
-    return builder
-      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-      .setColor(Color.rgb(15, 118, 110))
-      .setContentTitle(title)
-      .setContentText(text)
-      .setCategory(Notification.CATEGORY_ALARM)
-      .setPriority(Notification.PRIORITY_MAX)
-      .setOngoing(true)
-      .setAutoCancel(false)
-      .setVisibility(Notification.VISIBILITY_PUBLIC)
-      .setWhen(current?.triggerAtMillis ?: System.currentTimeMillis())
-      .setFullScreenIntent(contentIntent, true)
-      .setContentIntent(contentIntent)
-      .build()
-  }
-
-  private fun buildAlarmUri(record: AlarmRecord?): Uri? {
-    val builder = Uri.Builder().scheme("medirecord").authority("alarma")
-    record?.let {
-      builder.appendQueryParameter("occurrenceId", it.occurrenceId)
-      builder.appendQueryParameter("medicationName", it.title)
-      it.dose?.let { dose -> builder.appendQueryParameter("dose", dose) }
-      builder.appendQueryParameter("scheduledAt", it.scheduledAt)
-    }
-    return builder.build()
-  }
-
-  private fun updateNotification() {
-    getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+  private fun updateNotification(userId: String) {
+    getSystemService(android.app.NotificationManager::class.java)?.notify(
+      MedicationAlarmNotification.NOTIFICATION_ID,
+      MedicationAlarmNotification.build(this, AlarmStore.activeForUser(this, userId), fullScreen = true),
+    )
   }
 
   private fun stopAlertAndSelf() {
@@ -182,6 +166,9 @@ class MedicationAlarmService : Service() {
     mediaPlayer = null
     vibrator?.cancel()
     vibrator = null
+    MedicationAlarmNotification.cancel(this)
+    AlarmStore.clearServiceUser(this)
+    serviceUserId = null
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
   }

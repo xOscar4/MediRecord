@@ -4,10 +4,10 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import { ActionButton } from '@/components/form-controls';
-import { AppIcon, StatusPill, SurfaceCard } from '@/components/ui-kit';
+import { AppIcon, FormSection, StatusPill } from '@/components/ui-kit';
 import MedicationAlarm, { type NativeAlarmPermissionState } from '@modules/medication-alarm';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 const EMPTY_STATE: NativeAlarmPermissionState = {
@@ -34,7 +34,6 @@ function PermissionRow({ label, description, allowed }: { label: string; descrip
 }
 
 export function AlarmPermissionSettings() {
-  const theme = useTheme();
   const [state, setState] = useState<NativeAlarmPermissionState>(EMPTY_STATE);
 
   const refresh = useCallback(async () => {
@@ -54,11 +53,10 @@ export function AlarmPermissionSettings() {
   }
 
   return (
-    <SurfaceCard style={styles.card}>
-      <View style={styles.heading}>
-        <View style={[styles.headingIcon, { backgroundColor: theme.primarySoft }]}><AppIcon name={{ ios: 'bell.badge.fill', android: 'notifications_active' }} color={theme.primary} size={22} /></View>
-        <View style={styles.headingCopy}><ThemedText type="subtitle">Permisos de alarmas</ThemedText><ThemedText type="small" themeColor="textSecondary">Necesarios para recordatorios puntuales y persistentes.</ThemedText></View>
-      </View>
+    <FormSection
+      icon={{ ios: 'bell.badge.fill', android: 'notifications_active' }}
+      title="Permisos de alarmas"
+      description="Necesarios para recordatorios puntuales y persistentes.">
       <PermissionRow label="Notificaciones" description="Muestra la alarma persistente y su estado." allowed={state.notificationsEnabled} />
       <PermissionRow label="Alarmas exactas" description="Permite activar el recordatorio a la hora programada." allowed={state.exactAlarmsAllowed} />
       <PermissionRow label="Pantalla completa" description="Permite mostrar la alarma de forma visible cuando corresponde." allowed={state.fullScreenIntentAllowed} />
@@ -69,17 +67,13 @@ export function AlarmPermissionSettings() {
       {!state.fullScreenIntentAllowed ? <ActionButton label="Abrir permiso de pantalla completa" onPress={() => void MedicationAlarm.openFullScreenIntentSettings()} tone="neutral" /> : null}
       {!state.batteryOptimizationExempt ? <ActionButton label="Revisar optimización de batería" onPress={() => void MedicationAlarm.openBatterySettings()} tone="neutral" /> : null}
       <ThemedText type="small" themeColor="textSecondary" style={styles.note}>Android y el fabricante pueden limitar alarmas, volumen, vibración o pantalla completa. MediRecord no puede anular esas restricciones.</ThemedText>
-    </SurfaceCard>
+    </FormSection>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { gap: Spacing.three },
-  heading: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
-  headingIcon: { alignItems: 'center', borderRadius: 14, height: 44, justifyContent: 'center', width: 44 },
-  headingCopy: { flex: 1, gap: 2 },
   permissionRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
-  permissionIcon: { alignItems: 'center', borderRadius: 12, height: 36, justifyContent: 'center', width: 36 },
+  permissionIcon: { alignItems: 'center', borderRadius: Radius.sm, height: 36, justifyContent: 'center', width: 36 },
   permissionCopy: { flex: 1, gap: 2 },
   note: { lineHeight: 19 },
 });

@@ -1,14 +1,13 @@
 /**
- * Learn more about light and dark modes:
- * https://docs.expo.dev/guides/color-schemes/
+ * Tema efectivo de la aplicación. La preferencia (automático/claro/oscuro)
+ * vive en `ThemePreferenceProvider` y persiste en el almacenamiento local.
  */
 
 import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemePreference } from '@/providers/theme-provider';
 
 export function useTheme() {
-  const scheme = useColorScheme();
-  const theme = scheme === 'unspecified' ? 'light' : scheme;
+  const { scheme } = useThemePreference();
 
-  return Colors[theme];
+  return Colors[scheme];
 }

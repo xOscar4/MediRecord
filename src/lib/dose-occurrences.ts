@@ -20,13 +20,20 @@ function readQueue(userId: string): QueuedResolution[] {
       && typeof (item as QueuedResolution).queuedAt === 'string'
     ));
   } catch {
+    console.warn('[MediRecord] La cola offline estaba corrupta; se reiniciará de forma segura.');
+    try { localStorage.removeItem(queueKey(userId)); } catch { /* almacenamiento no disponible */ }
     return [];
   }
 }
 
 function writeQueue(userId: string, queue: QueuedResolution[]): void {
-  if (queue.length === 0) localStorage.removeItem(queueKey(userId));
-  else localStorage.setItem(queueKey(userId), JSON.stringify(queue));
+  try {
+    if (queue.length === 0) localStorage.removeItem(queueKey(userId));
+    else localStorage.setItem(queueKey(userId), JSON.stringify(queue));
+  } catch (error) {
+    console.warn('[MediRecord] No se pudo persistir la cola offline.', error);
+    throw new Error('No pudimos guardar localmente la confirmación de la toma. La alarma seguirá activa.');
+  }
 }
 
 function enqueue(userId: string, occurrenceId: string): void {
@@ -37,13 +44,20 @@ function enqueue(userId: string, occurrenceId: string): void {
 }
 
 function dequeue(userId: string, occurrenceId: string): void {
-  writeQueue(userId, readQueue(userId).filter((item) => item.occurrenceId !== occurrenceId));
+  try {
+    writeQueue(userId, readQueue(userId).filter((item) => item.occurrenceId !== occurrenceId));
+  } catch (error) {
+    // La toma ya se registró remotamente. Si falla la limpieza local, el
+    // siguiente flush verá el estado resuelto y volverá a intentar quitarla.
+    console.warn('[MediRecord] No se pudo limpiar la cola offline.', error);
+  }
 }
 
 function isRetryable(error: unknown): boolean {
   if (!error || typeof error !== 'object') return true;
   const candidate = error as { code?: string; message?: string };
-  if (candidate.code && ['42501', 'PGRST301', 'PGRST302', '23514'].includes(candidate.code)) return false;
+  if (candidate.code && ['PGRST301', 'PGRST302'].includes(candidate.code)) return true;
+  if (candidate.code && ['42501', '23514'].includes(candidate.code)) return false;
   const message = (candidate.message ?? '').toLowerCase();
   return !message.includes('permission') && !message.includes('jwt') && !message.includes('not authenticated');
 }
@@ -88,6 +102,9 @@ export async function confirmDoseTaken(occurrenceId: string): Promise<DoseResolu
   if (!userId) throw new Error('Tu sesión ya no es válida. Vuelve a iniciar sesión para registrar la toma.');
 
   try {
+    // La intención queda durable antes de cualquier intento remoto. La UI
+    // puede detener el sonido solamente después de llamar a esta preparación.
+    enqueue(userId, occurrenceId);
     const result = await updatePendingOccurrence(userId, occurrenceId);
     if (result === 'pending') throw new Error('La toma sigue pendiente y no pudo confirmarse.');
     dequeue(userId, occurrenceId);
@@ -99,6 +116,13 @@ export async function confirmDoseTaken(occurrenceId: string): Promise<DoseResolu
   }
 }
 
+export async function prepareDoseConfirmation(occurrenceId: string): Promise<void> {
+  if (!occurrenceId) throw new Error('La ocurrencia de la toma no es válida.');
+  const userId = await getUserId();
+  if (!userId) throw new Error('Tu sesión ya no es válida. Vuelve a iniciar sesión para registrar la toma.');
+  enqueue(userId, occurrenceId);
+}
+
 export async function flushPendingDoseResolutions(): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;
@@ -108,7 +132,11 @@ export async function flushPendingDoseResolutions(): Promise<void> {
       const result = await updatePendingOccurrence(userId, item.occurrenceId);
       if (result !== 'pending') dequeue(userId, item.occurrenceId);
     } catch (error) {
-      if (!isRetryable(error)) continue;
+      if (!isRetryable(error)) {
+        // No se descarta la intención: queda en la cola y se informa para que
+        // el error de permisos no pase desapercibido.
+        console.warn(`[MediRecord] La confirmación ${item.occurrenceId} requiere revisión manual.`, error);
+      }
     }
   }
 }

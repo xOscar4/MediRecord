@@ -31,7 +31,11 @@
         {
           "backgroundColor": "#F4F8FA",
           "image": "./assets/images/medirecord-splash.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "dark": {
+            "backgroundColor": "#101B24",
+            "image": "./assets/images/medirecord-splash.png"
+          }
         }
       ],
       "expo-sqlite",
@@ -51,8 +55,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "ab5fd0b2-2a53-4578-8ca9-c6d44a3368b7"
+        "projectId": "d3d28dff-6800-4db1-948d-c243e4eb40f4"
       }
-    }
+    },
+    "owner": "xoscarin"
   }
 }

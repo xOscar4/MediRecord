@@ -82,7 +82,7 @@ export class MedicationArchiveError extends Error {
   }
 }
 
-function parseDoseForm(value: string | null): MedicationDoseForm | null {
+export function parseDoseForm(value: string | null): MedicationDoseForm | null {
   return value && DOSE_FORMS.includes(value as MedicationDoseForm)
     ? (value as MedicationDoseForm)
     : null;

@@ -2,16 +2,17 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { Link, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { ActionButton } from '@/components/form-controls';
 import emptyAnimation from '@/assets/animations/medirecord-empty.json';
 import loadingAnimation from '@/assets/animations/medirecord-loading.json';
 import { LottieAnimation } from '@/components/lottie-animation';
 import { MedicationCard } from '@/components/medication-card';
-import { AppIcon, AnimatedCard, EmptyState, SectionLabel } from '@/components/ui-kit';
+import { AppIcon, AnimatedCard, EmptyState, PageHeader, SegmentedControl } from '@/components/ui-kit';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { archiveMedication, fetchMedicationCatalog, restoreMedication } from '@/lib/medications';
 import { reconcileMedicationAlarms } from '@/lib/medication-alarm-reconciler';
@@ -22,60 +23,69 @@ type MedicationFilter = 'active' | 'archived';
 type LoadState = { userId: string; catalog: MedicationCatalog | null; error: string | null };
 type ActionState = { medicationId: string; action: 'archive' | 'restore' } | null;
 
-function FilterButton({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="tab"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.filterButton, { backgroundColor: selected ? theme.primary : 'transparent' }]}>
-      <ThemedText type="smallBold" style={{ color: selected ? '#FFFFFF' : theme.textSecondary }}>{label}</ThemedText>
-    </Pressable>
-  );
-}
+const FILTER_OPTIONS = [
+  { value: 'active', label: 'Activos' },
+  { value: 'archived', label: 'Archivados' },
+] as const;
 
 function Header({ filter, onFilterChange, onRetry, isError, actionError }: { filter: MedicationFilter; onFilterChange: (filter: MedicationFilter) => void; onRetry: () => void; isError: boolean; actionError: string | null }) {
   const theme = useTheme();
+  const addButtonScale = useSharedValue(1);
+  const addButtonAnimatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: addButtonScale.value }] }));
+
   return (
     <View style={styles.headerContent}>
       <AnimatedCard delay={40}>
-        <View style={styles.pageHeader}>
-          <View style={styles.titleCopy}>
-            <SectionLabel>Tu tratamiento</SectionLabel>
-            <ThemedText type="title" style={styles.title}>Medicamentos</ThemedText>
-            <ThemedText themeColor="textSecondary" style={styles.description}>Consulta tus tratamientos y horarios en un solo lugar.</ThemedText>
-          </View>
-          <View style={[styles.headerIcon, { backgroundColor: theme.primarySoft }]}><AppIcon name={{ ios: 'pills.fill', android: 'medication' }} color={theme.primary} size={28} /></View>
-        </View>
+        <PageHeader
+          eyebrow="Tu tratamiento"
+          title="Medicamentos"
+          description="Consulta tus tratamientos y horarios en un solo lugar."
+          icon={{ ios: 'pills.fill', android: 'medication' }}
+        />
       </AnimatedCard>
 
-      <View style={[styles.filter, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-        <FilterButton label="Activos" selected={filter === 'active'} onPress={() => onFilterChange('active')} />
-        <FilterButton label="Archivados" selected={filter === 'archived'} onPress={() => onFilterChange('archived')} />
-      </View>
+      <SegmentedControl options={FILTER_OPTIONS} value={filter} onChange={onFilterChange} />
 
       <Link href="/medicamentos/nuevo" asChild>
-        <Pressable accessibilityRole="button" style={({ pressed }) => [styles.addButton, { backgroundColor: theme.primary, borderColor: theme.primary, opacity: pressed ? 0.86 : 1 }]}>
-          <View style={[styles.addIcon, { backgroundColor: '#FFFFFF22' }]}>
-            <AppIcon name={{ ios: 'plus', android: 'add' }} color="#FFFFFF" size={22} />
-          </View>
-          <View style={styles.addCopy}><ThemedText type="smallBold" style={styles.addLabel}>Agregar medicamento</ThemedText><ThemedText type="small" style={styles.addHint}>Registra un nuevo tratamiento</ThemedText></View>
-          <AppIcon name={{ ios: 'chevron.right', android: 'chevron_right' }} color="#FFFFFF" size={19} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Agregar medicamento"
+          onPressIn={() => {
+            addButtonScale.set(withTiming(0.97, { duration: 110 }));
+          }}
+          onPressOut={() => {
+            addButtonScale.set(withTiming(1, { duration: 160 }));
+          }}
+          style={styles.addButtonPressable}>
+          <Animated.View
+            style={[
+              styles.addButton,
+              { backgroundColor: theme.primary, boxShadow: theme.shadow },
+              addButtonAnimatedStyle,
+            ]}>
+            <AppIcon name={{ ios: 'plus', android: 'add' }} color={theme.heroText} size={22} />
+            <ThemedText type="smallBold" style={[styles.addButtonLabel, { color: theme.heroText }]}>
+              Agregar medicamento
+            </ThemedText>
+          </Animated.View>
         </Pressable>
       </Link>
 
       {isError ? (
-        <View style={[styles.errorCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-          <AppIcon name={{ ios: 'exclamationmark.triangle', android: 'warning' }} color={theme.danger} size={23} />
-          <View style={styles.errorCopy}><ThemedText type="smallBold">No pudimos cargar los medicamentos.</ThemedText><ThemedText type="small" themeColor="textSecondary">Comprueba tu conexión e inténtalo de nuevo.</ThemedText></View>
+        <View style={[styles.errorCard, { backgroundColor: `${theme.danger}0D`, borderColor: `${theme.danger}33` }]}>
+          <View style={styles.errorCopy}>
+            <ThemedText type="smallBold">No pudimos cargar los medicamentos.</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">Comprueba tu conexión e inténtalo de nuevo.</ThemedText>
+          </View>
           <ActionButton label="Reintentar" onPress={onRetry} tone="neutral" />
         </View>
       ) : null}
       {actionError ? (
-        <View style={[styles.errorCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
-          <AppIcon name={{ ios: 'exclamationmark.triangle', android: 'warning' }} color={theme.danger} size={23} />
-          <View style={styles.errorCopy}><ThemedText type="smallBold">No pudimos completar la operación.</ThemedText><ThemedText type="small" themeColor="textSecondary">{actionError}</ThemedText></View>
+        <View style={[styles.errorCard, { backgroundColor: `${theme.danger}0D`, borderColor: `${theme.danger}33` }]}>
+          <View style={styles.errorCopy}>
+            <ThemedText type="smallBold">No pudimos completar la operación.</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">{actionError}</ThemedText>
+          </View>
         </View>
       ) : null}
     </View>
@@ -195,9 +205,9 @@ export default function MedicamentosScreen() {
           <FlatList
             data={medications}
             keyExtractor={(item) => item.id}
-             renderItem={({ item, index }) => <AnimatedCard delay={index * 45}><MedicationCard medication={item} onArchive={filter === 'active' ? requestArchive : undefined} onRestore={filter === 'archived' ? requestRestore : undefined} actionLoading={actionState?.medicationId === item.id} /></AnimatedCard>}
+            renderItem={({ item, index }) => <AnimatedCard delay={index * 45}><MedicationCard medication={item} onArchive={filter === 'active' ? requestArchive : undefined} onRestore={filter === 'archived' ? requestRestore : undefined} actionLoading={actionState?.medicationId === item.id} /></AnimatedCard>}
             ListHeaderComponent={header}
-             ListEmptyComponent={<EmptyState icon={{ ios: filter === 'active' ? 'pills' : 'archivebox', android: filter === 'active' ? 'medication' : 'inventory_2' }} animation={{ source: emptyAnimation, accessibilityLabel: 'Ilustración animada de medicamentos' }} title={filter === 'active' ? 'No tienes medicamentos activos' : 'No tienes medicamentos archivados'} body={filter === 'active' ? 'Cuando registres un tratamiento aparecerá aquí.' : 'Los medicamentos que archives aparecerán en esta sección.'} />}
+            ListEmptyComponent={<EmptyState icon={{ ios: filter === 'active' ? 'pills' : 'archivebox', android: filter === 'active' ? 'medication' : 'inventory_2' }} animation={{ source: emptyAnimation, accessibilityLabel: 'Ilustración animada de medicamentos' }} title={filter === 'active' ? 'No tienes medicamentos activos' : 'No tienes medicamentos archivados'} body={filter === 'active' ? 'Cuando registres un tratamiento aparecerá aquí.' : 'Los medicamentos que archives aparecerán en esta sección.'} />}
             contentContainerStyle={[styles.content, medications.length === 0 && styles.emptyContent]}
             contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
@@ -214,19 +224,10 @@ const styles = StyleSheet.create({
   content: { alignSelf: 'center', gap: Spacing.three, maxWidth: MaxContentWidth, paddingBottom: BottomTabInset + Spacing.five, paddingHorizontal: Spacing.four, paddingTop: Spacing.two, width: '100%' },
   emptyContent: { flexGrow: 1 },
   headerContent: { gap: Spacing.three },
-  pageHeader: { alignItems: 'center', flexDirection: 'row', gap: Spacing.three, justifyContent: 'space-between' },
-  titleCopy: { flex: 1, gap: 5 },
-  title: { fontSize: 34, lineHeight: 39 },
-  description: { lineHeight: 22 },
-  headerIcon: { alignItems: 'center', borderRadius: 20, height: 64, justifyContent: 'center', width: 64 },
-  filter: { borderRadius: 16, borderWidth: 1, flexDirection: 'row', padding: 4 },
-  filterButton: { alignItems: 'center', borderRadius: 12, flex: 1, minHeight: 42, justifyContent: 'center', paddingHorizontal: 8 },
-  addButton: { alignItems: 'center', borderRadius: 18, borderWidth: 1, flexDirection: 'row', gap: 12, minHeight: 68, paddingHorizontal: 14 },
-  addIcon: { alignItems: 'center', borderRadius: 12, height: 40, justifyContent: 'center', width: 40 },
-  addCopy: { flex: 1, gap: 2 },
-  addLabel: { color: '#FFFFFF' },
-  addHint: { color: '#DDF4F0' },
-  errorCard: { alignItems: 'center', borderRadius: 18, borderWidth: 1, flexDirection: 'row', gap: 10, padding: 14 },
-  errorCopy: { flex: 1, gap: 2 },
+  addButtonPressable: { width: '100%' },
+  addButton: { alignItems: 'center', borderRadius: Radius.md, flexDirection: 'row', gap: 9, justifyContent: 'center', minHeight: 56, paddingHorizontal: Spacing.three, width: '100%' },
+  addButtonLabel: { fontSize: 16, letterSpacing: 0.2 },
+  errorCard: { borderRadius: Radius.md, borderWidth: 1, gap: Spacing.two, padding: 14 },
+  errorCopy: { gap: 2 },
   loading: { alignItems: 'center', flex: 1, gap: Spacing.three, justifyContent: 'center' },
 });

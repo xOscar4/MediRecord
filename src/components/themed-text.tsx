@@ -21,7 +21,7 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
         type === 'smallBold' && styles.smallBold,
         type === 'subtitle' && [styles.subtitle, { fontFamily: Fonts.rounded }],
         type === 'link' && styles.link,
-        type === 'linkPrimary' && styles.linkPrimary,
+        type === 'linkPrimary' && [styles.linkPrimary, { color: theme.primary }],
         type === 'code' && styles.code,
         style,
       ]}
@@ -44,17 +44,19 @@ const styles = StyleSheet.create({
   default: {
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '500',
+    fontWeight: 500,
   },
   title: {
-    fontSize: 38,
+    fontSize: 36,
     fontWeight: '700',
-    lineHeight: 44,
+    letterSpacing: -0.8,
+    lineHeight: 42,
   },
   subtitle: {
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 25,
+    lineHeight: 31,
     fontWeight: '700',
+    letterSpacing: -0.3,
   },
   link: {
     lineHeight: 30,
@@ -63,7 +65,6 @@ const styles = StyleSheet.create({
   linkPrimary: {
     lineHeight: 30,
     fontSize: 14,
-    color: '#3c87f7',
   },
   code: {
     fontFamily: Fonts.mono,

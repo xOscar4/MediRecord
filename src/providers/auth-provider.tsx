@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import MedicationAlarm from '@modules/medication-alarm';
 
 export type Profile = {
   id: string;
@@ -269,10 +270,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    if (userId && MedicationAlarm.available) {
+      try {
+        const cleared = await MedicationAlarm.clearUserAlarms(userId);
+        if (!cleared) throw new Error('clearUserAlarms returned false');
+      } catch (error) {
+        console.warn('[MediRecord] No se pudieron limpiar las alarmas antes de cerrar sesión.', error);
+        throw new Error('No pudimos detener y limpiar tus alarmas antes de cerrar sesión. Inténtalo de nuevo.');
+      }
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw new Error(translateAuthError(error));
     setProfileSnapshot(null);
-  }, []);
+  }, [userId]);
 
   const refreshProfile = useCallback(async () => {
     if (!userId) return;

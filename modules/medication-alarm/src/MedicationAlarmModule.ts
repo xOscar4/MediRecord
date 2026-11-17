@@ -2,12 +2,14 @@ import { requireOptionalNativeModule, type NativeModule } from 'expo';
 
 export type NativeAlarmRecord = {
   occurrenceId: string;
+  userId: string;
   triggerAtMillis: number;
   title: string;
   dose: string | null;
   scheduledAt: string;
   timezone: string;
   active: boolean;
+  armed: boolean;
 };
 
 export type NativeAlarmPermissionState = {
@@ -18,18 +20,22 @@ export type NativeAlarmPermissionState = {
 };
 
 type MedicationAlarmNativeModule = NativeModule & {
-  scheduleAlarm(input: {
-    occurrenceId: string;
-    triggerAtMillis: number;
-    title: string;
-    dose: string | null;
-    scheduledAt: string;
-    timezone: string;
-  }): Promise<boolean>;
-  cancelAlarm(occurrenceId: string): Promise<boolean>;
-  getScheduledAlarms(): Promise<NativeAlarmRecord[]>;
-  getActiveAlarms(): Promise<NativeAlarmRecord[]>;
-  resumeActiveAlarms(): Promise<boolean>;
+  scheduleAlarm(
+    occurrenceId: string,
+    userId: string,
+    triggerAtMillis: number,
+    title: string,
+    dose: string | null,
+    scheduledAt: string,
+    timezone: string,
+  ): Promise<boolean>;
+  cancelAlarm(occurrenceId: string, userId: string): Promise<boolean>;
+  getScheduledAlarms(userId: string): Promise<NativeAlarmRecord[]>;
+  getActiveAlarms(userId: string): Promise<NativeAlarmRecord[]>;
+  resumeActiveAlarms(userId: string): Promise<boolean>;
+  clearUserAlarms(userId: string): Promise<boolean>;
+  setAuthorizedUser(userId: string): Promise<boolean>;
+  clearAuthorizedUser(userId: string): Promise<boolean>;
   getPermissionState(): Promise<NativeAlarmPermissionState>;
   openNotificationSettings(): Promise<boolean>;
   openExactAlarmSettings(): Promise<boolean>;
@@ -47,11 +53,30 @@ function unavailable<T>(): Promise<T> {
 
 const MedicationAlarmModule = {
   available: medicationAlarmNativeAvailable,
-  scheduleAlarm: (input: Parameters<MedicationAlarmNativeModule['scheduleAlarm']>[0]) => nativeModule?.scheduleAlarm(input) ?? unavailable<boolean>(),
-  cancelAlarm: (occurrenceId: string) => nativeModule?.cancelAlarm(occurrenceId) ?? unavailable<boolean>(),
-  getScheduledAlarms: () => nativeModule?.getScheduledAlarms() ?? Promise.resolve([]),
-  getActiveAlarms: () => nativeModule?.getActiveAlarms() ?? Promise.resolve([]),
-  resumeActiveAlarms: () => nativeModule?.resumeActiveAlarms() ?? Promise.resolve(false),
+  scheduleAlarm: (input: {
+    occurrenceId: string;
+    userId: string;
+    triggerAtMillis: number;
+    title: string;
+    dose: string | null;
+    scheduledAt: string;
+    timezone: string;
+  }) => nativeModule?.scheduleAlarm(
+    input.occurrenceId,
+    input.userId,
+    input.triggerAtMillis,
+    input.title,
+    input.dose,
+    input.scheduledAt,
+    input.timezone,
+  ) ?? unavailable<boolean>(),
+  cancelAlarm: (occurrenceId: string, userId: string) => nativeModule?.cancelAlarm(occurrenceId, userId) ?? unavailable<boolean>(),
+  getScheduledAlarms: (userId: string) => nativeModule?.getScheduledAlarms(userId) ?? Promise.resolve([]),
+  getActiveAlarms: (userId: string) => nativeModule?.getActiveAlarms(userId) ?? Promise.resolve([]),
+  resumeActiveAlarms: (userId: string) => nativeModule?.resumeActiveAlarms(userId) ?? Promise.resolve(false),
+  clearUserAlarms: (userId: string) => nativeModule?.clearUserAlarms(userId) ?? Promise.resolve(false),
+  setAuthorizedUser: (userId: string) => nativeModule?.setAuthorizedUser(userId) ?? Promise.resolve(false),
+  clearAuthorizedUser: (userId: string) => nativeModule?.clearAuthorizedUser(userId) ?? Promise.resolve(false),
   getPermissionState: () => nativeModule?.getPermissionState() ?? Promise.resolve({
     notificationsEnabled: false,
     exactAlarmsAllowed: false,

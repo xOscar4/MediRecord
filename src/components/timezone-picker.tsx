@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActionButton } from '@/components/form-controls';
 import { AppIcon } from '@/components/ui-kit';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type TimezoneOption = {
@@ -118,9 +118,9 @@ export function TimezonePickerModal({ visible, selectedTimezone, onClose, onConf
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={isSaving ? undefined : onClose}>
       <View style={styles.modalRoot}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Cerrar selector" style={styles.backdrop} onPress={isSaving ? undefined : onClose} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Cerrar selector" style={[styles.backdrop, { backgroundColor: theme.overlay }]} onPress={isSaving ? undefined : onClose} />
         <KeyboardAvoidingView style={styles.sheetPosition} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <SafeAreaView style={[styles.sheet, { backgroundColor: theme.backgroundElement }]}>
+          <SafeAreaView style={[styles.sheet, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleRow}>
                 <View style={[styles.sheetIcon, { backgroundColor: theme.primarySoft }]}><AppIcon name={{ ios: 'globe.americas.fill', android: 'public' }} color={theme.primary} size={22} /></View>
@@ -165,9 +165,9 @@ export function TimezonePickerModal({ visible, selectedTimezone, onClose, onConf
 
 const styles = StyleSheet.create({
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(9, 30, 40, 0.42)' },
+  backdrop: { ...StyleSheet.absoluteFill },
   sheetPosition: { maxHeight: '88%', width: '100%' },
-  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, gap: Spacing.two, minHeight: 480, overflow: 'hidden', paddingHorizontal: Spacing.four, paddingTop: Spacing.four },
+  sheet: { borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, borderTopWidth: 1, gap: Spacing.two, minHeight: 480, overflow: 'hidden', paddingHorizontal: Spacing.four, paddingTop: Spacing.four },
   sheetHeader: { alignItems: 'flex-start', flexDirection: 'row', justifyContent: 'space-between' },
   sheetTitleRow: { alignItems: 'center', flexDirection: 'row', flex: 1, gap: 12 },
   sheetIcon: { alignItems: 'center', borderRadius: 14, height: 42, justifyContent: 'center', width: 42 },

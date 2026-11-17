@@ -4,7 +4,7 @@ import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { TextField } from '@/components/form-controls';
 import { AppIcon, SurfaceCard } from '@/components/ui-kit';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import type { MedicationScheduleDraft } from '@/types/medications';
@@ -160,7 +160,7 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
                     disabled={disabled}
                     onPress={() => toggleDay(schedule, day.value)}
                     style={[styles.dayButton, { backgroundColor: selected ? theme.primary : theme.background, borderColor: selected ? theme.primary : theme.border, opacity: disabled ? 0.55 : 1 }]}>
-                    <ThemedText type="smallBold" style={{ color: selected ? '#FFFFFF' : theme.textSecondary }}>{day.label}</ThemedText>
+                    <ThemedText type="smallBold" style={{ color: selected ? theme.onPrimary : theme.textSecondary }}>{day.label}</ThemedText>
                   </Pressable>
                 );
               })}
@@ -226,14 +226,30 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
         accessibilityState={{ disabled }}
         disabled={disabled}
         onPress={addSchedule}
-        style={({ pressed }) => [styles.addButton, { backgroundColor: theme.primarySoft, borderColor: theme.border, opacity: disabled ? 0.45 : pressed ? 0.78 : 1 }]}>
+        style={({ pressed }) => [styles.addButton, { backgroundColor: theme.primarySoft, borderColor: theme.primary, opacity: disabled ? 0.45 : pressed ? 0.78 : 1 }]}>
         <AppIcon name={{ ios: 'plus.circle.fill', android: 'add_circle' }} color={theme.primary} size={21} />
         <ThemedText type="smallBold" style={{ color: theme.primary }}>Agregar otro horario</ThemedText>
       </Pressable>
 
-      {pickerTarget ? (
+      {/* En Android el componente nativo ya es un diálogo modal: debe montarse
+          directamente y desmontarse al confirmar o cancelar. Envolverlo en un
+          Modal de React Native puede impedir que llegue la confirmación. */}
+      {pickerTarget && Platform.OS === 'android' ? (
+        <DateTimePicker
+          value={parsePickerDate(pickerTarget)}
+          mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
+          display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
+          presentation="dialog"
+          is24Hour
+          accentColor={theme.primary}
+          onValueChange={(_event, date) => handlePickerValue(date)}
+          onDismiss={() => setPickerTarget(null)}
+        />
+      ) : null}
+
+      {pickerTarget && Platform.OS !== 'android' ? (
         <Modal transparent animationType="fade" visible onRequestClose={() => setPickerTarget(null)}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setPickerTarget(null)}>
+          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.overlay }]} onPress={() => setPickerTarget(null)}>
             <Pressable style={[styles.pickerCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]} onPress={(event) => event.stopPropagation()}>
               <View style={styles.pickerHeading}>
                 <View style={styles.pickerCopy}>
@@ -248,17 +264,15 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
                 value={parsePickerDate(pickerTarget)}
                 mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
                 display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
-                presentation={Platform.OS === 'android' ? 'dialog' : 'inline'}
+                presentation="inline"
                 is24Hour
                 accentColor={theme.primary}
                 onValueChange={(_event, date) => handlePickerValue(date)}
                 onDismiss={() => setPickerTarget(null)}
               />
-              {Platform.OS !== 'android' ? (
-                <Pressable accessibilityRole="button" onPress={() => setPickerTarget(null)} style={[styles.closePickerButton, { backgroundColor: theme.primary }]}>
-                  <ThemedText type="smallBold" style={styles.closePickerLabel}>Cerrar</ThemedText>
-                </Pressable>
-              ) : null}
+              <Pressable accessibilityRole="button" onPress={() => setPickerTarget(null)} style={[styles.closePickerButton, { backgroundColor: theme.primary }]}>
+                <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Cerrar</ThemedText>
+              </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
@@ -289,24 +303,23 @@ const styles = StyleSheet.create({
   scheduleTitleCopy: { flex: 1, gap: 2 },
   iconButton: { alignItems: 'center', borderRadius: 12, height: 38, justifyContent: 'center', width: 38 },
   timeSection: { gap: Spacing.two },
-  timeButton: { alignItems: 'center', borderRadius: 16, borderWidth: 1, flexDirection: 'row', gap: 11, minHeight: 64, paddingHorizontal: 12 },
-  timeIcon: { alignItems: 'center', borderRadius: 12, height: 40, justifyContent: 'center', width: 40 },
+  timeButton: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 11, minHeight: 66, paddingHorizontal: 12 },
+  timeIcon: { alignItems: 'center', borderRadius: Radius.sm, height: 40, justifyContent: 'center', width: 40 },
   timeValue: { flex: 1, fontVariant: ['tabular-nums'] },
   timeAction: { alignItems: 'center', flexDirection: 'row', gap: 2 },
   daysSection: { gap: Spacing.two },
   daysRow: { flexDirection: 'row', gap: Spacing.one },
-  dayButton: { alignItems: 'center', borderRadius: 12, borderWidth: 1, flex: 1, height: 38, justifyContent: 'center', minWidth: 0 },
+  dayButton: { alignItems: 'center', borderRadius: Radius.sm, borderWidth: 1, flex: 1, height: 40, justifyContent: 'center', minWidth: 0 },
   dateRow: { flexDirection: 'row', gap: Spacing.two },
   dateField: { flex: 1, minWidth: 0 },
   notesInput: { minHeight: 78, textAlignVertical: 'top' },
-  pickerTrigger: { alignItems: 'center', borderRadius: 12, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 6, minHeight: 44, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 },
+  pickerTrigger: { alignItems: 'center', borderRadius: Radius.sm, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 6, minHeight: 44, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 },
   pickerTriggerLabel: { flex: 1, flexShrink: 1, minWidth: 0 },
-  addButton: { alignItems: 'center', borderRadius: 16, borderWidth: 1, flexDirection: 'row', gap: 9, justifyContent: 'center', minHeight: 50, paddingHorizontal: 14 },
-  modalBackdrop: { alignItems: 'center', backgroundColor: '#102A4366', flex: 1, justifyContent: 'center', padding: Spacing.four },
-  pickerCard: { borderRadius: 24, borderWidth: 1, gap: Spacing.three, maxWidth: 420, padding: Spacing.three, width: '100%' },
+  addButton: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 9, justifyContent: 'center', minHeight: 52, paddingHorizontal: 14 },
+  modalBackdrop: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: Spacing.four },
+  pickerCard: { borderRadius: Radius.lg, borderWidth: 1, gap: Spacing.three, maxWidth: 420, padding: Spacing.three, width: '100%' },
   pickerHeading: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   pickerCopy: { flex: 1, gap: 3 },
   closeButton: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
-  closePickerButton: { alignItems: 'center', borderRadius: 14, minHeight: 44, justifyContent: 'center' },
-  closePickerLabel: { color: '#FFFFFF' },
+  closePickerButton: { alignItems: 'center', borderRadius: Radius.md, minHeight: 46, justifyContent: 'center' },
 });

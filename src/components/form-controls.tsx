@@ -6,11 +6,12 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { AppIcon, type AppIconName } from '@/components/ui-kit';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type TextFieldProps = TextInputProps & {
@@ -18,12 +19,16 @@ export type TextFieldProps = TextInputProps & {
   hint?: string;
 };
 
-export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField({ label, hint, style, ...inputProps }, ref) {
+export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField(
+  { label, hint, style, onFocus, onBlur, ...inputProps },
+  ref
+) {
   const theme = useTheme();
+  const [isFocused, setIsFocused] = useState(false);
 
   return (
     <View style={styles.field}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
+      <ThemedText type="smallBold" themeColor="textSecondary" style={styles.label}>
         {label}
       </ThemedText>
       <TextInput
@@ -33,11 +38,19 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           styles.input,
           {
             color: theme.text,
-            backgroundColor: theme.backgroundElement,
-            borderColor: theme.border,
+            backgroundColor: theme.background,
+            borderColor: isFocused ? theme.primary : theme.border,
           },
           style,
         ]}
+        onFocus={(event) => {
+          setIsFocused(true);
+          onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setIsFocused(false);
+          onBlur?.(event);
+        }}
         {...inputProps}
       />
       {hint ? (
@@ -55,6 +68,8 @@ export type ActionButtonProps = {
   loading?: boolean;
   disabled?: boolean;
   tone?: 'primary' | 'neutral' | 'danger';
+  size?: 'default' | 'large';
+  icon?: AppIconName;
 };
 
 export function ActionButton({
@@ -63,6 +78,8 @@ export function ActionButton({
   loading = false,
   disabled = false,
   tone = 'primary',
+  size = 'default',
+  icon,
 }: ActionButtonProps) {
   const theme = useTheme();
   const isDisabled = disabled || loading;
@@ -71,7 +88,7 @@ export function ActionButton({
 
   const backgroundColor =
     tone === 'primary' ? theme.primary : tone === 'danger' ? theme.danger : theme.backgroundElement;
-  const textColor = tone === 'neutral' ? theme.text : '#ffffff';
+  const textColor = tone === 'primary' ? theme.onPrimary : tone === 'danger' ? theme.onDanger : theme.text;
 
   return (
     <Pressable
@@ -88,13 +105,26 @@ export function ActionButton({
       style={({ pressed }) => [
         { opacity: isDisabled ? 0.45 : pressed ? 0.9 : 1 },
       ]}>
-      <Animated.View style={[styles.button, { backgroundColor }, animatedStyle]}>
+      <Animated.View
+        style={[
+          styles.button,
+          size === 'large' && styles.buttonLarge,
+          {
+            backgroundColor,
+            borderColor: tone === 'neutral' ? theme.border : backgroundColor,
+            boxShadow: isDisabled ? undefined : theme.shadow,
+          },
+          animatedStyle,
+        ]}>
         {loading ? (
           <ActivityIndicator color={textColor} />
         ) : (
-          <ThemedText type="smallBold" style={[styles.buttonLabel, { color: textColor }]}>
-            {label}
-          </ThemedText>
+          <>
+            {icon ? <AppIcon name={icon} color={textColor} size={size === 'large' ? 22 : 19} /> : null}
+            <ThemedText type="smallBold" style={[styles.buttonLabel, size === 'large' && styles.buttonLabelLarge, { color: textColor }]}>
+              {label}
+            </ThemedText>
+          </>
         )}
       </Animated.View>
     </Pressable>
@@ -105,22 +135,37 @@ const styles = StyleSheet.create({
   field: {
     gap: Spacing.two,
   },
+  label: {
+    letterSpacing: 0.4,
+  },
   input: {
-    minHeight: 48,
+    minHeight: 52,
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: Radius.md,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingVertical: 14,
     fontSize: 16,
+    fontWeight: '500',
   },
   button: {
-    minHeight: 48,
-    borderRadius: 16,
     alignItems: 'center',
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
     justifyContent: 'center',
+    minHeight: 52,
     paddingHorizontal: Spacing.four,
+  },
+  buttonLarge: {
+    borderRadius: Radius.lg,
+    minHeight: 60,
+    paddingHorizontal: Spacing.five,
   },
   buttonLabel: {
     fontSize: 15,
+  },
+  buttonLabelLarge: {
+    fontSize: 17,
   },
 });
