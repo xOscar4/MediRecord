@@ -1,9 +1,17 @@
 import { SymbolView, type AndroidSymbol, type SFSymbol } from 'expo-symbols';
-import { Pressable, StyleSheet, View, type PressableProps, type StyleProp, type ViewProps, type ViewStyle } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Pressable, StyleSheet, useWindowDimensions, View, type PressableProps, type StyleProp, type ViewProps, type ViewStyle } from 'react-native';
+import Animated, {
+  FadeInDown,
+  FadeOut,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import type { ReactNode } from 'react';
 
 import healthAnimation from '@/assets/animations/medirecord-health.json';
+import pillAnimation from '@/assets/animations/medirecord-pill.json';
 import { ThemedText } from '@/components/themed-text';
 import { LottieAnimation, type LottieSource } from '@/components/lottie-animation';
 import { Radius, Spacing } from '@/constants/theme';
@@ -25,7 +33,18 @@ export function BrandMark({ size = 54 }: { size?: number }) {
 }
 
 export function HealthIllustration() {
-  return <LottieAnimation source={healthAnimation} size={150} accessibilityLabel="Ilustración animada de salud y medicamentos" />;
+  const { width } = useWindowDimensions();
+  // La composición es 220x160. Calcular el ancho disponible evita que la
+  // ilustración se desplace al borde o se recorte en pantallas estrechas.
+  const size = Math.min(220, Math.max(140, width - 64));
+  return (
+    <LottieAnimation
+      source={healthAnimation}
+      size={size}
+      aspectRatio={220 / 160}
+      accessibilityLabel="Ilustración animada de salud y medicamentos"
+    />
+  );
 }
 
 export function SurfaceCard({ children, style, ...props }: ViewProps) {
@@ -60,8 +79,66 @@ export function StatusPill({ label, tone, compact = false, style }: { label: str
   );
 }
 
-export function AnimatedCard({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: object }) {
-  return <Animated.View entering={FadeInDown.duration(360).delay(delay)} style={style}>{children}</Animated.View>;
+export function AnimatedCard({ children, delay = 0, style, exit = false }: { children: React.ReactNode; delay?: number; style?: object; exit?: boolean }) {
+  return (
+    <Animated.View
+      entering={FadeInDown.duration(260).delay(delay).reduceMotion(ReduceMotion.System)}
+      exiting={exit ? FadeOut.duration(150).reduceMotion(ReduceMotion.System) : undefined}
+      style={style}>
+      {children}
+    </Animated.View>
+  );
+}
+
+type AnimatedPressableProps = Omit<PressableProps, 'style'> & {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+};
+
+/** Pressable con un feedback de escala muy sutil, coherente en claro y oscuro. */
+export function AnimatedPressable({ children, style, onPressIn, onPressOut, ...props }: AnimatedPressableProps) {
+  const scale = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <Pressable
+      {...props}
+      onPressIn={(event) => {
+        scale.set(withTiming(0.97, { duration: 100, reduceMotion: ReduceMotion.System }));
+        onPressIn?.(event);
+      }}
+      onPressOut={(event) => {
+        scale.set(withTiming(1, { duration: 160, reduceMotion: ReduceMotion.System }));
+        onPressOut?.(event);
+      }}
+      style={style}>
+      <Animated.View style={animatedStyle}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
+/** Estado de carga reutilizable: animación de pastilla + texto breve + líneas de contenido. */
+export function LoadingState({ label, compact = false }: { label: string; compact?: boolean }) {
+  const theme = useTheme();
+  const animationSize = compact ? 44 : 60;
+  return (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel={label} style={[styles.loadingState, compact && styles.loadingStateCompact]}>
+      <LottieAnimation
+        source={pillAnimation}
+        size={animationSize}
+        accessibilityLabel={label}
+        style={{ backgroundColor: theme.primarySoft, borderRadius: Radius.pill }}
+      />
+      <ThemedText type="small" themeColor="textSecondary">{label}</ThemedText>
+      {!compact ? (
+        <View style={styles.skeleton}>
+          <View style={[styles.skeletonLine, { backgroundColor: theme.border, width: '88%' }]} />
+          <View style={[styles.skeletonLine, { backgroundColor: theme.border, width: '70%' }]} />
+          <View style={[styles.skeletonLine, { backgroundColor: theme.primarySoft, width: '52%' }]} />
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 export function QuickAction({ icon, label, hint, ...props }: PressableProps & { icon: AppIconName; label: string; hint: string }) {
@@ -192,6 +269,10 @@ const styles = StyleSheet.create({
   quickAction: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 12, minHeight: 66, paddingHorizontal: 14 },
   quickIcon: { alignItems: 'center', borderRadius: Radius.sm, height: 40, justifyContent: 'center', width: 40 },
   quickCopy: { flex: 1, gap: 2 },
+  loadingState: { alignItems: 'center', gap: Spacing.two, paddingHorizontal: 8, paddingVertical: 22 },
+  loadingStateCompact: { paddingVertical: 12 },
+  skeleton: { alignItems: 'center', gap: 8, marginTop: 6, width: '100%' },
+  skeletonLine: { borderRadius: Radius.pill, height: 10 },
   emptyState: { alignItems: 'center', gap: 8, paddingHorizontal: 8, paddingVertical: 18 },
   emptyIcon: { alignItems: 'center', borderRadius: Radius.lg, height: 58, justifyContent: 'center', marginBottom: 4, width: 58 },
   emptyTitle: { textAlign: 'center' },

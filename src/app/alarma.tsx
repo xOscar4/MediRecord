@@ -3,10 +3,12 @@ import { BackHandler, Platform, ScrollView, StyleSheet, View } from 'react-nativ
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import successAnimation from '@/assets/animations/medirecord-success.json';
 import { ActionButton } from '@/components/form-controls';
 import { AlarmVisual } from '@/components/alarm-visual';
+import { LottieAnimation } from '@/components/lottie-animation';
 import { MedicationPhotoThumbnail } from '@/components/medication-photo-section';
-import { AppIcon, BrandMark, SurfaceCard } from '@/components/ui-kit';
+import { AnimatedCard, AppIcon, BrandMark, SurfaceCard } from '@/components/ui-kit';
 import { confirmDoseTaken, prepareDoseConfirmation } from '@/lib/dose-occurrences';
 import { supabase } from '@/lib/supabase';
 import MedicationAlarm from '@modules/medication-alarm';
@@ -129,13 +131,17 @@ export default function AlarmaScreen() {
     return (
       <ThemedView style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <View style={styles.result}>
-            <BrandMark size={64} />
-            <AppIcon name={{ ios: 'checkmark.circle.fill', android: 'check_circle' }} color={theme.success} size={38} />
+          <AnimatedCard style={styles.result}>
+            <BrandMark size={56} />
+            {outcome === 'queued' || !outcome ? (
+              <AppIcon name={{ ios: 'info.circle.fill', android: 'info' }} color={theme.warning} size={44} />
+            ) : (
+              <LottieAnimation source={successAnimation} size={96} loop={false} accessibilityLabel="Toma registrada correctamente" />
+            )}
             <ThemedText type="title" style={styles.resultTitle}>{outcome === 'queued' ? 'Alarma detenida' : 'Toma revisada'}</ThemedText>
             <ThemedText themeColor="textSecondary" style={styles.centerText}>{message}</ThemedText>
             <ActionButton label="Volver a inicio" onPress={() => router.replace('/')} size="large" />
-          </View>
+          </AnimatedCard>
         </SafeAreaView>
       </ThemedView>
     );

@@ -7,7 +7,7 @@ import {
   type TextInputProps,
 } from 'react-native';
 import { forwardRef, useState } from 'react';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { AppIcon, type AppIconName } from '@/components/ui-kit';
@@ -97,10 +97,10 @@ export function ActionButton({
       disabled={isDisabled}
       onPress={onPress}
       onPressIn={() => {
-        scale.set(withTiming(0.97, { duration: 100 }));
+        scale.set(withTiming(0.97, { duration: 100, reduceMotion: ReduceMotion.System }));
       }}
       onPressOut={() => {
-        scale.set(withTiming(1, { duration: 160 }));
+        scale.set(withTiming(1, { duration: 160, reduceMotion: ReduceMotion.System }));
       }}
       style={({ pressed }) => [
         { opacity: isDisabled ? 0.45 : pressed ? 0.9 : 1 },

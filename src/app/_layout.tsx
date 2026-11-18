@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import { AppState, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { useEffect, useMemo } from 'react';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -27,7 +27,12 @@ function RootNavigator() {
   return (
     <>
       <AlarmCoordinator enabled={session !== null} userId={session?.user.id ?? null} />
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: Platform.OS === 'android' ? 'slide_from_right' : 'default',
+          animationTypeForReplace: 'push',
+        }}>
         <Stack.Protected guard={session !== null}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="medicamentos" />

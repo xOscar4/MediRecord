@@ -201,6 +201,22 @@ export async function reconcileMedicationAlarms(): Promise<void> {
     }
   }
 
+  // El módulo nativo ya rechaza las alarmas exactas sin este permiso. Consultarlo
+  // aquí evita intentos de programación repetidos y mantiene la navegación
+  // intacta mientras la persona no lo concede.
+  let exactAlarmsAllowed = true;
+  try {
+    const permissionState = await MedicationAlarm.getPermissionState();
+    exactAlarmsAllowed = permissionState.exactAlarmsAllowed;
+  } catch (error) {
+    reportReconciliationError('permiso de alarmas exactas', error);
+    exactAlarmsAllowed = false;
+  }
+  if (!exactAlarmsAllowed) {
+    console.warn('[MediRecord] Permiso de alarmas exactas no concedido; no se programarán alarmas hasta autorizarlo.');
+    return;
+  }
+
   for (const record of desired.values()) {
     const existing = scheduled.find((item) => item.occurrenceId === record.occurrenceId);
     if (record.active || (existing && existing.armed && sameSchedule(existing, record))) continue;

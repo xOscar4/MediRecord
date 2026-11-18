@@ -73,9 +73,9 @@ export type MedicationRestoreResult = {
 };
 
 export class MedicationArchiveError extends Error {
-  readonly action: 'archive' | 'restore';
+  readonly action: 'archive' | 'restore' | 'delete';
 
-  constructor(action: 'archive' | 'restore', message: string) {
+  constructor(action: 'archive' | 'restore' | 'delete', message: string) {
     super(message);
     this.name = 'MedicationArchiveError';
     this.action = action;
@@ -369,6 +369,39 @@ export async function restoreMedication(medicationId: string): Promise<Medicatio
     archivedSchedules: typeof data.archived_schedules === 'number' ? data.archived_schedules : 0,
     requiresNewSchedule: data.requires_new_schedule === true,
   };
+}
+
+export type MedicationDeleteResult = {
+  medicationId: string;
+  deleted: boolean;
+};
+
+/**
+ * Eliminación definitiva mediante la RPC ya desplegada. La RPC protege el
+ * historial: bloquea la eliminación si existen tomas registradas o fotografía,
+ * y solo borra la fila del medicamento (los horarios se eliminan en cascada).
+ */
+export async function deleteMedication(medicationId: string): Promise<MedicationDeleteResult> {
+  if (!medicationId) throw new MedicationArchiveError('delete', 'El medicamento solicitado no es válido.');
+
+  const { data, error } = await supabase.rpc('delete_medication', {
+    p_medication_id: medicationId,
+  });
+
+  if (error) {
+    const message = error.message && (error.code === '23503' || error.code === '23514')
+      ? error.message
+      : error.code === '42501'
+        ? 'Tu sesión no permite eliminar este medicamento. Vuelve a iniciar sesión.'
+        : 'No pudimos eliminar el medicamento. Inténtalo de nuevo.';
+    throw new MedicationArchiveError('delete', message);
+  }
+
+  if (!isRecord(data) || data.deleted !== true || typeof data.medication_id !== 'string') {
+    throw new MedicationArchiveError('delete', 'No recibimos una confirmación válida de la eliminación. Recarga e inténtalo de nuevo.');
+  }
+
+  return { medicationId: data.medication_id, deleted: true };
 }
 
 export async function fetchMedicationById(medicationId: string): Promise<Medication> {

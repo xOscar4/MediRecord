@@ -38,7 +38,14 @@
           }
         }
       ],
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "android": {
+            "enableFTS": true
+          }
+        }
+      ],
       [
         "expo-notifications",
         {

@@ -1,21 +1,12 @@
-import * as Notifications from 'expo-notifications';
-import { useCallback, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { ActionButton } from '@/components/form-controls';
-import { AppIcon, FormSection, StatusPill } from '@/components/ui-kit';
-import MedicationAlarm, { type NativeAlarmPermissionState } from '@modules/medication-alarm';
+import { AppIcon, FormSection, InlineMessage, StatusPill } from '@/components/ui-kit';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import { useReminderPermissions } from '@/hooks/use-reminder-permissions';
 import { useTheme } from '@/hooks/use-theme';
-
-const EMPTY_STATE: NativeAlarmPermissionState = {
-  notificationsEnabled: false,
-  exactAlarmsAllowed: false,
-  fullScreenIntentAllowed: false,
-  batteryOptimizationExempt: false,
-};
 
 function PermissionRow({ label, description, allowed }: { label: string; description: string; allowed: boolean }) {
   const theme = useTheme();
@@ -34,44 +25,89 @@ function PermissionRow({ label, description, allowed }: { label: string; descrip
 }
 
 export function AlarmPermissionSettings() {
-  const [state, setState] = useState<NativeAlarmPermissionState>(EMPTY_STATE);
+  const { state, requestNotifications, openSetting } = useReminderPermissions();
+  const [isRequestingNotifications, setIsRequestingNotifications] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (Platform.OS !== 'android' || !MedicationAlarm.available) return;
-    setState(await MedicationAlarm.getPermissionState());
-  }, []);
+  if (!state.supported) return null;
 
-  useFocusEffect(useCallback(() => {
-    void refresh();
-  }, [refresh]));
+  const overallTone = !state.loaded ? 'neutral' : state.ready ? 'success' : 'warning';
+  const overallLabel = !state.loaded ? 'Verificando' : state.ready ? 'Listo' : 'Revisar';
 
-  if (Platform.OS !== 'android' || !MedicationAlarm.available) return null;
-
-  async function requestNotifications() {
-    await Notifications.requestPermissionsAsync();
-    await refresh();
+  async function handleRequestNotifications() {
+    setIsRequestingNotifications(true);
+    try {
+      await requestNotifications();
+    } finally {
+      setIsRequestingNotifications(false);
+    }
   }
 
   return (
     <FormSection
       icon={{ ios: 'bell.badge.fill', android: 'notifications_active' }}
-      title="Permisos de alarmas"
-      description="Necesarios para recordatorios puntuales y persistentes.">
-      <PermissionRow label="Notificaciones" description="Muestra la alarma persistente y su estado." allowed={state.notificationsEnabled} />
-      <PermissionRow label="Alarmas exactas" description="Permite activar el recordatorio a la hora programada." allowed={state.exactAlarmsAllowed} />
-      <PermissionRow label="Pantalla completa" description="Permite mostrar la alarma de forma visible cuando corresponde." allowed={state.fullScreenIntentAllowed} />
-      <PermissionRow label="Batería" description="Android puede limitar procesos si aplica optimización agresiva." allowed={state.batteryOptimizationExempt} />
-      {!state.notificationsEnabled ? <ActionButton label="Habilitar notificaciones" onPress={() => void requestNotifications()} tone="neutral" /> : null}
-      {!state.notificationsEnabled ? <ActionButton label="Abrir ajustes de notificaciones" onPress={() => void MedicationAlarm.openNotificationSettings()} tone="neutral" /> : null}
-      {!state.exactAlarmsAllowed ? <ActionButton label="Abrir alarmas y recordatorios" onPress={() => void MedicationAlarm.openExactAlarmSettings()} tone="neutral" /> : null}
-      {!state.fullScreenIntentAllowed ? <ActionButton label="Abrir permiso de pantalla completa" onPress={() => void MedicationAlarm.openFullScreenIntentSettings()} tone="neutral" /> : null}
-      {!state.batteryOptimizationExempt ? <ActionButton label="Revisar optimización de batería" onPress={() => void MedicationAlarm.openBatterySettings()} tone="neutral" /> : null}
-      <ThemedText type="small" themeColor="textSecondary" style={styles.note}>Android y el fabricante pueden limitar alarmas, volumen, vibración o pantalla completa. MediRecord no puede anular esas restricciones.</ThemedText>
+      title="Recordatorios"
+      description="Estado verificado de lo que tu teléfono necesita para avisarte a la hora elegida.">
+      <View style={styles.overallRow}>
+        <ThemedText type="smallBold">Estado general</ThemedText>
+        <StatusPill label={overallLabel} tone={overallTone} compact />
+      </View>
+      <ThemedText type="small" themeColor="textSecondary">
+        {!state.loaded
+          ? 'Estamos comprobando los permisos reales del dispositivo…'
+          : state.ready
+            ? 'Los avisos están listos para funcionar con tus horarios.'
+            : 'Faltan opciones por activar. Tus horarios se guardan igual, pero algunos avisos podrían no llegar.'}
+      </ThemedText>
+
+      <PermissionRow
+        label="Notificaciones"
+        description="Para ver y escuchar el aviso de la toma."
+        allowed={state.notificationsReady}
+      />
+      <PermissionRow
+        label="Alarmas y recordatorios exactos"
+        description="Para que el aviso llegue a la hora elegida."
+        allowed={state.exactAlarmsAllowed}
+      />
+      <PermissionRow
+        label="Aviso en pantalla"
+        description="Para mostrar la alarma si el teléfono está bloqueado."
+        allowed={state.fullScreenIntentAllowed}
+      />
+
+      <ThemedText type="small" themeColor="textSecondary">
+        Canal de avisos: {state.nativeChannelExists ? 'disponible en este dispositivo.' : 'se creará al programar el primer recordatorio.'}
+      </ThemedText>
+
+      {!state.notificationsReady ? (
+        <>
+          {!state.notificationsGranted && state.canAskNotifications ? (
+            <ActionButton label="Habilitar notificaciones" onPress={() => void handleRequestNotifications()} tone="neutral" loading={isRequestingNotifications} />
+          ) : null}
+          <ActionButton label="Abrir ajustes de notificaciones" onPress={() => void openSetting('notifications')} tone="neutral" />
+        </>
+      ) : null}
+      {!state.exactAlarmsAllowed ? (
+        <ActionButton label="Abrir alarmas y recordatorios" onPress={() => void openSetting('exactAlarms')} tone="neutral" />
+      ) : null}
+      {!state.fullScreenIntentAllowed ? (
+        <ActionButton label="Permitir aviso en pantalla" onPress={() => void openSetting('fullScreen')} tone="neutral" />
+      ) : null}
+
+      <InlineMessage tone="info">
+        {state.batteryOptimizationExempt
+          ? 'La optimización de batería no está limitando MediRecord en este momento.'
+          : 'Algunos fabricantes limitan los avisos con la optimización de batería. No es obligatorio cambiar esa opción; solo tenla en cuenta si un recordatorio no llega.'}
+      </InlineMessage>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.note}>
+        Después de cambiar algo en Ajustes, vuelve a esta pantalla: volveremos a comprobar el estado real.
+      </ThemedText>
     </FormSection>
   );
 }
 
 const styles = StyleSheet.create({
+  overallRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two, justifyContent: 'space-between' },
   permissionRow: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two },
   permissionIcon: { alignItems: 'center', borderRadius: Radius.sm, height: 36, justifyContent: 'center', width: 36 },
   permissionCopy: { flex: 1, gap: 2 },

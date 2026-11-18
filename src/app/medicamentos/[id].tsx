@@ -1,19 +1,19 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionButton, TextField } from '@/components/form-controls';
 import { DoseFormSelector } from '@/components/dose-form-selector';
 import { MedicationPhotoSection, useMedicationPhotoUrl } from '@/components/medication-photo-section';
 import { ScheduleEditor } from '@/components/schedule-editor';
-import { AppIcon, FormSection, InlineMessage, PageHeader, SectionLabel, SurfaceCard } from '@/components/ui-kit';
+import { AppIcon, FormSection, InlineMessage, LoadingState, PageHeader, SectionLabel, SurfaceCard } from '@/components/ui-kit';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useMedicationArchive } from '@/hooks/use-medication-archive';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  archiveMedication,
   fetchMedicationById,
   MedicationEditError,
   saveMedicationScheduleChange,
@@ -53,13 +53,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'No pudimos cargar el medicamento. Inténtalo de nuevo.';
 }
 
-function deleteErrorMessage(error: unknown): string {
-  if (!(error instanceof Error)) return 'No pudimos eliminar el medicamento. Inténtalo de nuevo.';
-  // La RPC subyacente se llama "archivar"; en esta pantalla el usuario está
-  // confirmando una eliminación lógica, así que se ajusta la redacción.
-  return error.message.replace(/archivar/g, 'eliminar').replace(/archivad/g, 'eliminad');
-}
-
 export default function EditarMedicamentoScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const { user, profile } = useAuth();
@@ -74,10 +67,8 @@ export default function EditarMedicamentoScreen() {
   const [instructions, setInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<SelectedMedicationPhoto | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [isPhotoActionLoading, setIsPhotoActionLoading] = useState(false);
@@ -116,9 +107,25 @@ export default function EditarMedicamentoScreen() {
     }
   }, [refreshMedication]);
 
-  useFocusEffect(useCallback(() => {
-    void loadMedication();
-  }, [loadMedication]));
+  // Cargar una sola vez por medicamento: recargar en cada foco sobrescribía el
+  // horario recién elegido con el valor de la base de datos antes de guardar.
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    if (!userId) return;
+    // Diferir la carga para no llamar a setState de forma síncrona en el effect.
+    void Promise.resolve().then(() => { void loadMedication(); });
+  }, [loadMedication, medicationId, userId]);
+
+  const archive = useMedicationArchive({
+    confirmationTitle: 'Eliminar medicamento',
+    onArchived: (_result, medication) => {
+      Alert.alert(
+        'Medicamento movido a Archivados',
+        `${medication.name} ya no aparecerá en tu agenda activa. Sus datos y su historial de tomas se conservan.`,
+        [{ text: 'Volver a medicamentos', onPress: () => router.back() }]
+      );
+    },
+  });
 
   async function handleSave() {
     if (isSaving || !medication || !user) return;
@@ -205,40 +212,17 @@ export default function EditarMedicamentoScreen() {
   }
 
   function requestDelete() {
-    if (isSaving || isDeleting || isPhotoActionLoading || !medication || !user) return;
-    Alert.alert(
-      '¿Eliminar medicamento?',
-      '¿Estás seguro de que deseas eliminar este medicamento? Ya no aparecerá en tu lista de medicamentos ni en la agenda.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Eliminar medicamento', style: 'destructive', onPress: () => void deleteMedication() },
-      ]
-    );
-  }
-
-  async function deleteMedication() {
-    if (!medication) return;
-    setDeleteError(null);
-    setIsDeleting(true);
-    try {
-      // Eliminación lógica: archive_medication desactiva el medicamento y sus
-      // horarios, omite tomas futuras y conserva el historial de dosis.
-      await archiveMedication(medication.id, true);
-      await reconcileMedicationAlarms();
-      Alert.alert(
-        'Medicamento eliminado',
-        'Ya no aparecerá en tu agenda activa. El historial de tomas se conserva.',
-        [{ text: 'Volver a medicamentos', onPress: () => router.back() }]
-      );
-    } catch (error) {
-      setDeleteError(deleteErrorMessage(error));
-    } finally {
-      setIsDeleting(false);
-    }
+    if (isSaving || archive.pendingId || isPhotoActionLoading || !medication || !user) return;
+    archive.clearError();
+    archive.requestArchive(medication);
   }
 
   if (isLoading) {
-    return <ThemedView style={styles.centered}><ActivityIndicator color={theme.primary} /><ThemedText type="small" themeColor="textSecondary">Cargando medicamento…</ThemedText></ThemedView>;
+    return (
+      <ThemedView style={styles.centered}>
+        <LoadingState label="Cargando medicamento…" />
+      </ThemedView>
+    );
   }
 
   if (loadError || !medication) {
@@ -252,7 +236,7 @@ export default function EditarMedicamentoScreen() {
   }
 
   const initialDate = schedules[0]?.startDate ?? getTodayInTimezone(profile?.timezone);
-  const formBusy = isSaving || isDeleting || isPhotoActionLoading;
+  const formBusy = isSaving || archive.pendingId !== null || isPhotoActionLoading;
 
   return (
     <ThemedView style={styles.container}>
@@ -313,7 +297,7 @@ export default function EditarMedicamentoScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Eliminar medicamento"
-              accessibilityState={{ disabled: formBusy || !user, busy: isDeleting }}
+              accessibilityState={{ disabled: formBusy || !user, busy: archive.isPending(medication.id) }}
               disabled={formBusy || !user}
               onPress={requestDelete}
               style={({ pressed }) => [
@@ -326,10 +310,10 @@ export default function EditarMedicamentoScreen() {
               ]}>
               <AppIcon name={{ ios: 'trash', android: 'delete' }} color={theme.danger} size={19} />
               <ThemedText type="smallBold" style={{ color: theme.danger }}>
-                {isDeleting ? 'Eliminando…' : 'Eliminar medicamento'}
+                {archive.isPending(medication.id) ? 'Moviendo a Archivados…' : 'Eliminar medicamento'}
               </ThemedText>
             </Pressable>
-            {deleteError ? <InlineMessage>{deleteError}</InlineMessage> : null}
+            {archive.error ? <InlineMessage>{archive.error}</InlineMessage> : null}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -341,11 +325,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   flex: { flex: 1 },
   safeArea: { flex: 1 },
-  content: { alignSelf: 'center', gap: Spacing.three, maxWidth: MaxContentWidth, paddingBottom: BottomTabInset + Spacing.five, paddingHorizontal: Spacing.four, paddingTop: Spacing.two, width: '100%' },
+  content: { alignSelf: 'center', gap: Spacing.four, maxWidth: MaxContentWidth, paddingBottom: BottomTabInset + Spacing.five, paddingHorizontal: Spacing.four, paddingTop: Spacing.two, width: '100%' },
   centered: { alignItems: 'center', flex: 1, gap: Spacing.three, justifyContent: 'center', padding: Spacing.four },
-  formCard: { gap: Spacing.three },
+  formCard: { gap: Spacing.four },
   instructionsInput: { minHeight: 96, textAlignVertical: 'top' },
-  sectionHeader: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', paddingTop: Spacing.two },
+  sectionHeader: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', paddingTop: Spacing.three },
   sectionCopy: { gap: 3 },
   sectionTitle: { fontSize: 22, lineHeight: 28 },
   footerHint: { textAlign: 'center' },

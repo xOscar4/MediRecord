@@ -1,7 +1,7 @@
 import * as SplashScreen from 'expo-splash-screen';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Animated, { Easing, Keyframe } from 'react-native-reanimated';
+import Animated, { Easing, Keyframe, ReduceMotion } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { BrandMark } from '@/components/ui-kit';
@@ -33,7 +33,7 @@ export function AnimatedSplashOverlay() {
 
   return animate ? (
     <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
+      entering={splashKeyframe.duration(DURATION).reduceMotion(ReduceMotion.System).withCallback((finished) => {
         'worklet';
         if (finished) scheduleOnRN(setVisible, false);
       })}

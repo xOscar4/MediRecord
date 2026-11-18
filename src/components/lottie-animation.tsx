@@ -8,6 +8,8 @@ export type LottieSource = LottieViewProps['source'];
 type LottieAnimationProps = {
   source: LottieSource;
   size?: number;
+  /** Relación ancho/alto de la composición. Si se indica, `size` es el ancho. */
+  aspectRatio?: number;
   loop?: boolean;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel: string;
@@ -17,6 +19,7 @@ type LottieAnimationProps = {
 export function LottieAnimation({
   source,
   size = 120,
+  aspectRatio,
   loop = true,
   style,
   accessibilityLabel,
@@ -44,34 +47,46 @@ export function LottieAnimation({
     return () => subscription.remove();
   }, []);
 
-  const shouldPlay = visible && isFocused && isActive && !reduceMotion;
+  // Solo montamos la vista cuando puede ser vista. ReduceMotion no descarga la
+  // animación: la deja pausada en su primer fotograma.
+  const shouldMount = visible && isFocused && isActive;
+  const shouldPlay = shouldMount && !reduceMotion;
 
   useEffect(() => {
+    if (!animation.current) return;
     if (shouldPlay) {
-      animation.current?.reset();
-      animation.current?.play();
+      animation.current.reset();
+      animation.current.play();
     } else {
-      animation.current?.pause();
-      animation.current?.reset();
+      animation.current.pause();
+      animation.current.reset();
     }
-  }, [shouldPlay, source]);
+  }, [shouldMount, shouldPlay, source]);
+
+  const dimensions = aspectRatio
+    ? { height: size / aspectRatio, width: size }
+    : { height: size, width: size };
 
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={[styles.container, { height: size, width: size }, style]}>
-      <LottieView
-        ref={animation}
-        autoPlay={false}
-        cacheComposition
-        loop={loop}
-        resizeMode="contain"
-        source={source}
-        style={styles.animation}
-      />
+    <View accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={[styles.container, dimensions, style]}>
+      {shouldMount ? (
+        <LottieView
+          ref={animation}
+          autoPlay={false}
+          cacheComposition
+          loop={loop}
+          resizeMode="contain"
+          source={source}
+          style={styles.animation}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', justifyContent: 'center' },
+  // Las ilustraciones Lottie se comportan como imágenes: se centran dentro de su
+  // contenedor y nunca superan el ancho disponible en pantallas pequeñas.
+  container: { alignItems: 'center', alignSelf: 'center', justifyContent: 'center', maxWidth: '100%' },
   animation: { height: '100%', width: '100%' },
 });

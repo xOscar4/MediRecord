@@ -1,17 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
-import { DateTimePicker } from '@expo/ui/community/datetime-picker';
+import { DateTimePicker, type DateTimePickerEvent } from '@expo/ui/community/datetime-picker';
 import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { TextField } from '@/components/form-controls';
-import { AppIcon, SurfaceCard } from '@/components/ui-kit';
+import { ReminderPermissionModal } from '@/components/reminder-permission-modal';
+import {
+  applyPickedValue,
+  isoDateToPickerDate,
+  timeOfDayToPickerDate,
+} from '@/lib/schedule-time';
+import {
+  describeOpenedReminderSetting,
+  hasSeenReminderPrompt,
+  markReminderPromptSeen,
+} from '@/lib/reminder-permissions';
+import { AppIcon, InlineMessage, SurfaceCard } from '@/components/ui-kit';
 import { Radius, Spacing } from '@/constants/theme';
 import { ThemedText } from '@/components/themed-text';
+import { useReminderPermissions } from '@/hooks/use-reminder-permissions';
 import { useTheme } from '@/hooks/use-theme';
 import type { MedicationScheduleDraft } from '@/types/medications';
 
+type PickerKind = 'time' | 'startDate' | 'endDate';
+
 type PickerTarget = {
   scheduleId: string;
-  kind: 'time' | 'startDate' | 'endDate';
+  kind: PickerKind;
 } | null;
 
 const DAYS = [
@@ -46,61 +60,116 @@ type ScheduleEditorProps = {
 export function ScheduleEditor({ value, onChange, initialDate, disabled = false, error, showNotes = false }: ScheduleEditorProps) {
   const theme = useTheme();
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
-  // El diálogo nativo de Android recuerda el `initialDate` con el que se montó.
-  // Si recalculamos la fecha en cada render, cualquier re-render mientras el
-  // diálogo está abierto puede reiniciar la hora seleccionada a la original.
+  /** Fecha congelada durante la sesión del diálogo: el picker nativo de Android
+   * reconstruye su TimePickerState cuando cambia `value` mientras está abierto. */
   const [pickerDate, setPickerDate] = useState<Date | null>(null);
-  // El evento nativo puede entregarse después de un re-render; usar la referencia
-  // evita sobrescribir los cambios con un array `value` obsoleto.
+  /** Identificador de sesión: fuerza un montaje nuevo por cada apertura, sin
+   * reutilizar el estado de un diálogo anterior. */
+  const [pickerSession, setPickerSession] = useState(0);
+  const [isPermissionPromptVisible, setIsPermissionPromptVisible] = useState(false);
+  const [isActivatingPermissions, setIsActivatingPermissions] = useState(false);
+  const [permissionHint, setPermissionHint] = useState<string | null>(null);
+
+  const permissions = useReminderPermissions();
+
+  // `onChange` del picker nativo puede entregarse tras un re-render. Las refs
+  // se actualizan de forma síncrona para que nunca se use un target o un array
+  // de horarios obsoleto.
   const valueRef = useRef(value);
+  const targetRef = useRef<PickerTarget>(null);
+  const permissionCheckRef = useRef(false);
+
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
 
   function parsePickerDate(target: Exclude<PickerTarget, null>): Date {
-    const schedule = value.find((item) => item.id === target.scheduleId);
-    const source = target.kind === 'time'
-      ? schedule?.timeOfDay ?? '08:00'
-      : target.kind === 'startDate'
-        ? schedule?.startDate ?? initialDate
-        : schedule?.endDate || schedule?.startDate || initialDate;
-
+    const schedule = valueRef.current.find((item) => item.id === target.scheduleId);
     if (target.kind === 'time') {
-      const [hours, minutes] = source.split(':').map(Number);
-      const date = new Date();
-      date.setHours(hours || 0, minutes || 0, 0, 0);
-      return date;
+      return timeOfDayToPickerDate(schedule?.timeOfDay ?? '08:00');
     }
-
-    const [year, month, day] = source.split('-').map(Number);
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setFullYear(year || date.getFullYear(), (month || 1) - 1, day || 1);
-    return date;
+    const source = target.kind === 'startDate'
+      ? schedule?.startDate ?? initialDate
+      : schedule?.endDate || schedule?.startDate || initialDate;
+    return isoDateToPickerDate(source);
   }
 
-  function formatPickerDate(date: Date, kind: Exclude<PickerTarget, null>['kind']): string {
-    if (kind === 'time') {
-      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-    }
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  }
-
-  function openPicker(target: Exclude<PickerTarget, null>) {
-    setPickerDate(parsePickerDate(target));
-    setPickerTarget(target);
-  }
-
-  function handlePickerValue(date: Date) {
-    if (!pickerTarget || !date) return;
-    updateSchedule(pickerTarget.scheduleId, {
-      [pickerTarget.kind]: formatPickerDate(date, pickerTarget.kind),
-    });
-    if (Platform.OS === 'android') setPickerTarget(null);
+  function commitChange(next: MedicationScheduleDraft[]) {
+    valueRef.current = next;
+    onChange(next);
   }
 
   function updateSchedule(id: string, update: Partial<MedicationScheduleDraft>) {
-    onChange(valueRef.current.map((schedule) => schedule.id === id ? { ...schedule, ...update } : schedule));
+    commitChange(valueRef.current.map((schedule) => schedule.id === id ? { ...schedule, ...update } : schedule));
+  }
+
+  function openPicker(target: Exclude<PickerTarget, null>) {
+    const date = parsePickerDate(target);
+    targetRef.current = target;
+    setPickerDate(date);
+    setPickerTarget(target);
+    setPickerSession((session) => session + 1);
+  }
+
+  function closePicker() {
+    targetRef.current = null;
+    setPickerTarget(null);
+    setPickerDate(null);
+  }
+
+  async function maybePromptForPermissions() {
+    if (permissionCheckRef.current) return;
+    permissionCheckRef.current = true;
+    try {
+      // La hora ya se guardó; aquí solo se comprueba el estado real del
+      // dispositivo antes de mostrar el aviso por primera vez.
+      const snapshot = await permissions.refresh();
+      if (!snapshot.supported || snapshot.ready) return;
+      if (await hasSeenReminderPrompt()) return;
+      await markReminderPromptSeen();
+      setPermissionHint(null);
+      setIsPermissionPromptVisible(true);
+    } finally {
+      permissionCheckRef.current = false;
+    }
+  }
+
+  async function handleActivatePermissions() {
+    setIsActivatingPermissions(true);
+    setPermissionHint(null);
+    try {
+      const result = await permissions.activate();
+      if (result.opened) {
+        setPermissionHint(describeOpenedReminderSetting(result.opened));
+      } else if (!result.snapshot.ready) {
+        setPermissionHint('Aún faltan opciones por activar. Puedes seguir guardando, pero algunos recordatorios podrían no avisarte.');
+      }
+    } catch {
+      setPermissionHint('No pudimos abrir los ajustes. Puedes activarlos cuando quieras desde Perfil.');
+    } finally {
+      setIsActivatingPermissions(false);
+    }
+  }
+
+  function handleDismissPermissionPrompt() {
+    setIsPermissionPromptVisible(false);
+    setPermissionHint(null);
+  }
+
+  function handlePickerChange(event: DateTimePickerEvent, date?: Date) {
+    const target = targetRef.current;
+    if (!target || !date || Number.isNaN(date.getTime())) return;
+    // Android también informa de cancelaciones/cierres: solo 'set' debe escribir.
+    if (event.type !== 'set') return;
+
+    commitChange(applyPickedValue(valueRef.current, target.scheduleId, target.kind, date));
+    if (Platform.OS === 'android') closePicker();
+    if (target.kind === 'time') void maybePromptForPermissions();
+  }
+
+  function handlePickerDismiss() {
+    // Cancelar o cerrar el diálogo no debe modificar el horario.
+    closePicker();
   }
 
   function toggleDay(schedule: MedicationScheduleDraft, day: number) {
@@ -111,12 +180,26 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
   }
 
   function addSchedule() {
-    onChange([...value, createScheduleDraft(initialDate, value.length)]);
+    commitChange([...valueRef.current, createScheduleDraft(initialDate, valueRef.current.length)]);
   }
 
   function removeSchedule(id: string) {
-    onChange(value.filter((schedule) => schedule.id !== id));
+    commitChange(valueRef.current.filter((schedule) => schedule.id !== id));
   }
+
+  const pickerValue = pickerDate ?? timeOfDayToPickerDate('08:00');
+  const pickerProps = {
+    key: `${pickerTarget?.scheduleId ?? 'none'}-${pickerTarget?.kind ?? 'none'}-${pickerSession}`,
+    value: pickerValue,
+    mode: pickerTarget?.kind === 'time' ? 'time' as const : 'date' as const,
+    display: pickerTarget?.kind === 'time' ? 'clock' as const : 'calendar' as const,
+    is24Hour: true,
+    accentColor: theme.primary,
+    positiveButton: { label: 'Aceptar' },
+    negativeButton: { label: 'Cancelar' },
+    onChange: handlePickerChange,
+    onDismiss: handlePickerDismiss,
+  };
 
   return (
     <View style={styles.container}>
@@ -246,52 +329,52 @@ export function ScheduleEditor({ value, onChange, initialDate, disabled = false,
         <ThemedText type="smallBold" style={{ color: theme.primary }}>Agregar otro horario</ThemedText>
       </Pressable>
 
-      {/* En Android el componente nativo ya es un diálogo modal: debe montarse
-          directamente y desmontarse al confirmar o cancelar. Envolverlo en un
-          Modal de React Native puede impedir que llegue la confirmación. */}
+      {/*
+       * Android: el componente nativo ya es un diálogo modal. Se monta solo
+       * mientras hay un target y se desmonta al confirmar ('set') o cancelar.
+       * La key de sesión evita que un re-render reutilice el TimePickerState
+       * anterior con la hora inicial (08:00).
+       */}
       {pickerTarget && Platform.OS === 'android' ? (
-        <DateTimePicker
-          value={pickerDate ?? parsePickerDate(pickerTarget)}
-          mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
-          display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
-          presentation="dialog"
-          is24Hour
-          accentColor={theme.primary}
-          onValueChange={(_event, date) => handlePickerValue(date)}
-          onDismiss={() => setPickerTarget(null)}
-        />
+        <DateTimePicker {...pickerProps} presentation="dialog" />
       ) : null}
 
       {pickerTarget && Platform.OS !== 'android' ? (
-        <Modal transparent animationType="fade" visible onRequestClose={() => setPickerTarget(null)}>
-          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.overlay }]} onPress={() => setPickerTarget(null)}>
+        <Modal transparent animationType="fade" visible onRequestClose={handlePickerDismiss}>
+          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.overlay }]} onPress={handlePickerDismiss}>
             <Pressable style={[styles.pickerCard, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]} onPress={(event) => event.stopPropagation()}>
               <View style={styles.pickerHeading}>
                 <View style={styles.pickerCopy}>
                   <ThemedText type="smallBold">{pickerTarget.kind === 'time' ? 'Seleccionar hora' : pickerTarget.kind === 'startDate' ? 'Seleccionar inicio' : 'Seleccionar finalización'}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">Puedes confirmar o cancelar desde el selector.</ThemedText>
                 </View>
-                <Pressable accessibilityRole="button" accessibilityLabel="Cerrar selector" onPress={() => setPickerTarget(null)} style={styles.closeButton}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Cerrar selector" onPress={handlePickerDismiss} style={styles.closeButton}>
                   <AppIcon name={{ ios: 'xmark', android: 'close' }} color={theme.textSecondary} size={20} />
                 </Pressable>
               </View>
-              <DateTimePicker
-                value={pickerDate ?? parsePickerDate(pickerTarget)}
-                mode={pickerTarget.kind === 'time' ? 'time' : 'date'}
-                display={pickerTarget.kind === 'time' ? 'clock' : 'calendar'}
-                presentation="inline"
-                is24Hour
-                accentColor={theme.primary}
-                onValueChange={(_event, date) => handlePickerValue(date)}
-                onDismiss={() => setPickerTarget(null)}
-              />
-              <Pressable accessibilityRole="button" onPress={() => setPickerTarget(null)} style={[styles.closePickerButton, { backgroundColor: theme.primary }]}>
+              <DateTimePicker {...pickerProps} presentation="inline" />
+              <Pressable accessibilityRole="button" onPress={handlePickerDismiss} style={[styles.closePickerButton, { backgroundColor: theme.primary }]}>
                 <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Cerrar</ThemedText>
               </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
       ) : null}
+
+      {!isPermissionPromptVisible && permissions.state.loaded && permissions.state.supported && !permissions.state.ready ? (
+        <InlineMessage tone="info">
+          Tu hora quedó guardada, pero algunos recordatorios podrían no avisarte. Puedes activarlos cuando quieras desde Perfil.
+        </InlineMessage>
+      ) : null}
+
+      <ReminderPermissionModal
+        visible={isPermissionPromptVisible}
+        state={permissions.state}
+        busy={isActivatingPermissions}
+        hint={permissionHint}
+        onActivate={() => void handleActivatePermissions()}
+        onDismiss={handleDismissPermissionPrompt}
+      />
     </View>
   );
 }
@@ -312,29 +395,29 @@ function PickerTrigger({ label, icon, disabled, onPress }: { label: string; icon
 }
 
 const styles = StyleSheet.create({
-  container: { gap: Spacing.three },
-  scheduleCard: { gap: Spacing.three },
+  container: { gap: Spacing.four },
+  scheduleCard: { gap: Spacing.four },
   scheduleHeading: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  scheduleTitleCopy: { flex: 1, gap: 2 },
-  iconButton: { alignItems: 'center', borderRadius: 12, height: 38, justifyContent: 'center', width: 38 },
-  timeSection: { gap: Spacing.two },
-  timeButton: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 11, minHeight: 66, paddingHorizontal: 12 },
+  scheduleTitleCopy: { flex: 1, gap: Spacing.half },
+  iconButton: { alignItems: 'center', borderRadius: 12, height: 40, justifyContent: 'center', width: 40 },
+  timeSection: { gap: Spacing.three },
+  timeButton: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 11, minHeight: 68, paddingHorizontal: 12 },
   timeIcon: { alignItems: 'center', borderRadius: Radius.sm, height: 40, justifyContent: 'center', width: 40 },
   timeValue: { flex: 1, fontVariant: ['tabular-nums'] },
   timeAction: { alignItems: 'center', flexDirection: 'row', gap: 2 },
-  daysSection: { gap: Spacing.two },
-  daysRow: { flexDirection: 'row', gap: Spacing.one },
-  dayButton: { alignItems: 'center', borderRadius: Radius.sm, borderWidth: 1, flex: 1, height: 40, justifyContent: 'center', minWidth: 0 },
-  dateRow: { flexDirection: 'row', gap: Spacing.two },
-  dateField: { flex: 1, minWidth: 0 },
+  daysSection: { gap: Spacing.three },
+  daysRow: { flexDirection: 'row', gap: Spacing.two },
+  dayButton: { alignItems: 'center', borderRadius: Radius.sm, borderWidth: 1, flex: 1, height: 42, justifyContent: 'center', minWidth: 0 },
+  dateRow: { flexDirection: 'row', gap: Spacing.three },
+  dateField: { flex: 1, gap: Spacing.two, minWidth: 0 },
   notesInput: { minHeight: 78, textAlignVertical: 'top' },
   pickerTrigger: { alignItems: 'center', borderRadius: Radius.sm, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 6, minHeight: 44, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 },
   pickerTriggerLabel: { flex: 1, flexShrink: 1, minWidth: 0 },
   addButton: { alignItems: 'center', borderRadius: Radius.md, borderWidth: 1, flexDirection: 'row', gap: 9, justifyContent: 'center', minHeight: 52, paddingHorizontal: 14 },
   modalBackdrop: { alignItems: 'center', flex: 1, justifyContent: 'center', padding: Spacing.four },
-  pickerCard: { borderRadius: Radius.lg, borderWidth: 1, gap: Spacing.three, maxWidth: 420, padding: Spacing.three, width: '100%' },
+  pickerCard: { borderRadius: Radius.lg, borderWidth: 1, gap: Spacing.four, maxWidth: 420, padding: Spacing.three, width: '100%' },
   pickerHeading: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  pickerCopy: { flex: 1, gap: 3 },
+  pickerCopy: { flex: 1, gap: Spacing.half },
   closeButton: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
   closePickerButton: { alignItems: 'center', borderRadius: Radius.md, minHeight: 46, justifyContent: 'center' },
 });

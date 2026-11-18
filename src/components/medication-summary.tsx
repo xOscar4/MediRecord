@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { MedicationPhotoThumbnail } from '@/components/medication-photo-section';
 import { ThemedText } from '@/components/themed-text';
-import { AppIcon, StatusPill } from '@/components/ui-kit';
+import { AppIcon } from '@/components/ui-kit';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { MedicationDoseForm, MedicationSchedule } from '@/types/medications';
@@ -58,7 +58,6 @@ function ScheduleLine({ schedule, compact }: { schedule: MedicationScheduleSumma
           {formatScheduleDays(schedule.days_of_week)}
         </ThemedText>
       </View>
-      {!schedule.is_active ? <StatusPill label="Archivado" tone="warning" compact /> : null}
     </View>
   );
 }
@@ -123,15 +122,15 @@ export function MedicationSummaryHeader({
 }
 
 const styles = StyleSheet.create({
-  header: { alignItems: 'flex-start', flexDirection: 'row', gap: 14 },
-  copy: { flex: 1, gap: 4, minWidth: 0 },
-  nameRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 8 },
+  header: { alignItems: 'flex-start', flexDirection: 'row', gap: Spacing.three },
+  copy: { flex: 1, gap: Spacing.two, minWidth: 0 },
+  nameRow: { alignItems: 'flex-start', flexDirection: 'row', gap: Spacing.two },
   name: { flex: 1, fontSize: 21, lineHeight: 26, minWidth: 0 },
   nameCompact: { fontSize: 19, lineHeight: 24 },
-  trailing: { flexShrink: 0 },
+  trailing: { alignItems: 'center', flexDirection: 'row', flexShrink: 0, gap: Spacing.two },
   dose: { lineHeight: 20 },
-  scheduleList: { gap: Spacing.two, marginTop: 4 },
-  scheduleLine: { alignItems: 'center', flexDirection: 'row', gap: 9, minWidth: 0 },
+  scheduleList: { gap: Spacing.two, marginTop: Spacing.half },
+  scheduleLine: { alignItems: 'center', flexDirection: 'row', gap: Spacing.two, minWidth: 0 },
   scheduleIcon: { alignItems: 'center', flexShrink: 0, justifyContent: 'center' },
   scheduleCopy: { flex: 1, gap: 1, minWidth: 0 },
   scheduleTimeCompact: { fontSize: 13, lineHeight: 17 },
